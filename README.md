@@ -1,2 +1,2 @@
-VITE_SUPABASE_URL=https://your-project-id.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key-here
+VITE_SUPABASE_URL=[https://tagfzkffedlbiqtlncry.supabase.co]
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRhZ2Z6a2ZmZWRsYmlxdGxuY3J5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI2NDA0OTgsImV4cCI6MjA4ODIxNjQ5OH0.lX5yk-xbA1z2JjL2RJqVRb5G5NSzf9Yu9AxcGyWPqGI
