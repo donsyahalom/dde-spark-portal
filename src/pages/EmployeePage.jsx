@@ -3,8 +3,20 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { addDays, format } from 'date-fns'
 
-// Max sparks any one person can receive from you in a single day
 const PER_PERSON_DAILY_CAP = 2
+
+const REASON_CATEGORIES = [
+  'Going Above & Beyond',
+  'Teamwork & Collaboration',
+  'Customer Service Excellence',
+  'Safety Leadership',
+  'Problem Solving',
+  'Mentoring & Training',
+  'Reliability & Dependability',
+  'Innovation & Initiative',
+  'Positive Attitude',
+  'Other',
+]
 
 export default function EmployeePage() {
   const { currentUser, refreshUser } = useAuth()
@@ -12,11 +24,13 @@ export default function EmployeePage() {
   const [settings, setSettings] = useState({ vesting_period_days: 30 })
   const [selectedEmp, setSelectedEmp] = useState('')
   const [amount, setAmount] = useState(1)
+  const [reasonCategory, setReasonCategory] = useState('')
+  const [reasonText, setReasonText] = useState('')
   const [message, setMessage] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [history, setHistory] = useState([])
+  const [historyGiven, setHistoryGiven] = useState([])
+  const [historyReceived, setHistoryReceived] = useState([])
   const [me, setMe] = useState(currentUser)
-  // Map of to_employee_id -> sparks already given to them today (CT date)
   const [givenToday, setGivenToday] = useState({})
   const [ctToday, setCtToday] = useState(null)
 
@@ -33,16 +47,13 @@ export default function EmployeePage() {
   }, [])
 
   const fetchData = async () => {
-    // Run CT-based daily reset and vesting (handles midnight crossover)
     await supabase.rpc('reset_daily_sparks')
     await supabase.rpc('process_vesting')
 
-    // Get today's authoritative CT date from DB
     const { data: todayData } = await supabase.rpc('get_ct_today')
     const today = todayData || new Date().toISOString().split('T')[0]
     setCtToday(today)
 
-    // Settings
     const { data: settingsData } = await supabase.from('settings').select('*')
     if (settingsData) {
       const obj = {}
@@ -50,7 +61,6 @@ export default function EmployeePage() {
       setSettings({ vesting_period_days: parseInt(obj.vesting_period_days || 30) })
     }
 
-    // Other employees
     const { data: emps } = await supabase
       .from('employees')
       .select('id, first_name, last_name')
@@ -59,7 +69,6 @@ export default function EmployeePage() {
       .order('last_name')
     if (emps) setEmployees(emps)
 
-    // Per-recipient given counts for today (CT date)
     const { data: givenRows } = await supabase
       .from('daily_given')
       .select('to_employee_id, amount')
@@ -71,16 +80,26 @@ export default function EmployeePage() {
       setGivenToday(map)
     }
 
-    // Giving history
-    const { data: txns } = await supabase
+    // Sparks I gave
+    const { data: given } = await supabase
       .from('spark_transactions')
-      .select(`*, to_employee:to_employee_id(first_name, last_name)`)
+      .select('*, to_employee:to_employee_id(first_name, last_name)')
       .eq('from_employee_id', currentUser.id)
+      .in('transaction_type', ['assign'])
       .order('created_at', { ascending: false })
-      .limit(20)
-    if (txns) setHistory(txns)
+      .limit(30)
+    if (given) setHistoryGiven(given)
 
-    // Refresh own row (picks up the CT-reset daily_sparks_remaining)
+    // Sparks I received
+    const { data: received } = await supabase
+      .from('spark_transactions')
+      .select('*, from_employee:from_employee_id(first_name, last_name)')
+      .eq('to_employee_id', currentUser.id)
+      .in('transaction_type', ['assign'])
+      .order('created_at', { ascending: false })
+      .limit(30)
+    if (received) setHistoryReceived(received)
+
     const updated = await refreshUser()
     if (updated) setMe(updated)
   }
@@ -88,7 +107,6 @@ export default function EmployeePage() {
   const alreadyGivenToSelected = selectedEmp ? (givenToday[selectedEmp] || 0) : 0
   const perPersonRemaining = PER_PERSON_DAILY_CAP - alreadyGivenToSelected
   const dailyRemaining = me?.daily_sparks_remaining || 0
-  // Actual ceiling = the tighter of the two limits
   const maxCanGive = Math.max(0, Math.min(perPersonRemaining, dailyRemaining))
 
   const handleSelectEmp = (id) => {
@@ -109,8 +127,10 @@ export default function EmployeePage() {
     setMessage(null)
 
     const vestingDate = format(addDays(new Date(), settings.vesting_period_days), 'yyyy-MM-dd')
+    const reasonFull = reasonCategory
+      ? (reasonText.trim() ? `${reasonCategory}: ${reasonText.trim()}` : reasonCategory)
+      : (reasonText.trim() || null)
 
-    // Insert transaction record
     const { data: txn, error: txnError } = await supabase
       .from('spark_transactions')
       .insert({
@@ -119,14 +139,14 @@ export default function EmployeePage() {
         amount: numAmount,
         transaction_type: 'assign',
         vesting_date: vestingDate,
-        vested: false
+        vested: false,
+        reason: reasonFull
       })
       .select()
       .single()
 
     if (txnError) { setLoading(false); setMessage({ type: 'error', text: 'Failed to assign sparks' }); return }
 
-    // Queue for vesting
     await supabase.from('pending_vesting').insert({
       employee_id: selectedEmp,
       amount: numAmount,
@@ -134,18 +154,15 @@ export default function EmployeePage() {
       transaction_id: txn.id
     })
 
-    // Increment recipient's unvested total
     const { data: recipient } = await supabase.from('employees').select('unvested_sparks').eq('id', selectedEmp).single()
     await supabase.from('employees')
       .update({ unvested_sparks: (recipient?.unvested_sparks || 0) + numAmount, updated_at: new Date().toISOString() })
       .eq('id', selectedEmp)
 
-    // Deduct from my daily allowance
     await supabase.from('employees')
       .update({ daily_sparks_remaining: Math.max(0, dailyRemaining - numAmount), updated_at: new Date().toISOString() })
       .eq('id', currentUser.id)
 
-    // Upsert per-recipient daily_given (insert or add to existing)
     await supabase.from('daily_given').upsert({
       from_employee_id: currentUser.id,
       to_employee_id: selectedEmp,
@@ -161,6 +178,8 @@ export default function EmployeePage() {
     setLoading(false)
     setSelectedEmp('')
     setAmount(1)
+    setReasonCategory('')
+    setReasonText('')
     fetchData()
   }
 
@@ -194,6 +213,7 @@ export default function EmployeePage() {
         </div>
       </div>
 
+      {/* GIVE A SPARK */}
       <div className="card" style={{marginBottom:'20px'}}>
         <div className="card-title"><span className="icon">✨</span> Give a Spark</div>
         {message && <div className={`alert alert-${message.type}`}>{message.text}</div>}
@@ -206,9 +226,9 @@ export default function EmployeePage() {
           <>
             <div className="alert alert-warning" style={{marginBottom:'16px'}}>
               <strong>Daily rules:</strong> You have <strong>{dailyAllowance} sparks to give per day</strong> total,
-              with a maximum of <strong>2 sparks to any one person per day</strong>.
+              with a max of <strong>2 sparks to any one person per day</strong>.
               Sparks vest <strong>{settings.vesting_period_days} days</strong> after assignment.
-              Allowance resets at midnight <strong>Connecticut time</strong>.
+              Resets at midnight <strong>Connecticut time</strong>.
             </div>
 
             <div className="form-grid">
@@ -221,9 +241,7 @@ export default function EmployeePage() {
                     const canStillGive = PER_PERSON_DAILY_CAP - alreadyGiven
                     const suffix = canStillGive <= 0
                       ? ' — limit reached today'
-                      : alreadyGiven > 0
-                        ? ` (${alreadyGiven} given today)`
-                        : ''
+                      : alreadyGiven > 0 ? ` (${alreadyGiven} given today)` : ''
                     return (
                       <option key={e.id} value={e.id} disabled={canStillGive <= 0 || dailyRemaining <= 0}>
                         {e.first_name} {e.last_name}{suffix}
@@ -233,30 +251,45 @@ export default function EmployeePage() {
                 </select>
                 {selectedEmp && alreadyGivenToSelected > 0 && perPersonRemaining > 0 && (
                   <p style={{fontSize:'0.78rem', color:'var(--gold)', marginTop:'6px'}}>
-                    You've already given {alreadyGivenToSelected} spark{alreadyGivenToSelected > 1 ? 's' : ''} to this person today — {perPersonRemaining} more allowed.
+                    Already gave {alreadyGivenToSelected} spark{alreadyGivenToSelected > 1 ? 's' : ''} today — {perPersonRemaining} more allowed.
                   </p>
                 )}
               </div>
 
               <div className="form-group">
                 <label className="form-label">
-                  Amount
-                  {selectedEmp && maxCanGive > 0 && (
-                    <span style={{color:'var(--white-dim)', fontWeight:400, textTransform:'none', letterSpacing:0}}>
-                      {' '}(max {maxCanGive})
-                    </span>
-                  )}
+                  Amount{selectedEmp && maxCanGive > 0 && <span style={{color:'var(--white-dim)', fontWeight:400, textTransform:'none', letterSpacing:0}}> (max {maxCanGive})</span>}
                 </label>
                 <select className="form-select" value={amount}
                   onChange={e => setAmount(e.target.value)}
                   disabled={!selectedEmp || maxCanGive <= 0}>
                   {maxCanGive > 0
-                    ? [...Array(maxCanGive)].map((_, i) => (
-                        <option key={i + 1} value={i + 1}>{i + 1}</option>
-                      ))
+                    ? [...Array(maxCanGive)].map((_, i) => <option key={i+1} value={i+1}>{i+1}</option>)
                     : <option value={0}>0 — limit reached</option>
                   }
                 </select>
+              </div>
+            </div>
+
+            {/* Reason section */}
+            <div style={{borderTop:'1px solid var(--border)', paddingTop:'16px', marginTop:'4px'}}>
+              <div style={{fontSize:'0.75rem', letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--white-dim)', marginBottom:'12px'}}>
+                Recognition Reason <span style={{color:'var(--border-bright)', fontWeight:400}}>(optional)</span>
+              </div>
+              <div className="form-grid">
+                <div className="form-group" style={{marginBottom:'12px'}}>
+                  <label className="form-label">Category</label>
+                  <select className="form-select" value={reasonCategory} onChange={e => setReasonCategory(e.target.value)}>
+                    <option value="">Select a category...</option>
+                    {REASON_CATEGORIES.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div className="form-group" style={{marginBottom:'12px'}}>
+                  <label className="form-label">Additional Details</label>
+                  <input className="form-input" value={reasonText}
+                    onChange={e => setReasonText(e.target.value)}
+                    placeholder="Describe what they did..." maxLength={200} />
+                </div>
               </div>
             </div>
 
@@ -268,30 +301,80 @@ export default function EmployeePage() {
         )}
       </div>
 
-      <div className="card">
-        <div className="card-title"><span className="icon">📋</span> Sparks I've Given</div>
-        {history.length === 0 ? (
-          <div className="empty-state"><div className="icon">📋</div><p>No sparks given yet</p></div>
+      {/* SPARKS I GAVE */}
+      <div className="card" style={{marginBottom:'20px'}}>
+        <div className="card-title"><span className="icon">📤</span> Sparks I've Given</div>
+        {historyGiven.length === 0 ? (
+          <div className="empty-state"><div className="icon">📤</div><p>No sparks given yet</p></div>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Recipient</th>
-                  <th>Amount</th>
+                  <th>To</th>
+                  <th>✨</th>
+                  <th>Reason</th>
                   <th>Vests On</th>
                   <th>Status</th>
                   <th>Date</th>
                 </tr>
               </thead>
               <tbody>
-                {history.map(txn => (
+                {historyGiven.map(txn => (
                   <tr key={txn.id}>
-                    <td>{txn.to_employee?.first_name} {txn.to_employee?.last_name}</td>
+                    <td style={{fontWeight:600}}>{txn.to_employee?.first_name} {txn.to_employee?.last_name}</td>
                     <td><span className="spark-badge">✨ {txn.amount}</span></td>
+                    <td style={{fontSize:'0.82rem', color:'var(--white-dim)', maxWidth:'200px'}}>
+                      {txn.reason || <span style={{opacity:0.4}}>—</span>}
+                    </td>
                     <td style={{fontSize:'0.8rem'}}>{txn.vesting_date || '—'}</td>
                     <td><span className={`chip chip-${txn.vested ? 'green' : 'gold'}`}>{txn.vested ? 'Vested' : 'Pending'}</span></td>
-                    <td style={{fontSize:'0.8rem', color:'var(--white-dim)'}}>
+                    <td style={{fontSize:'0.8rem', color:'var(--white-dim)', whiteSpace:'nowrap'}}>
+                      {new Date(txn.created_at).toLocaleDateString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* SPARKS I RECEIVED */}
+      <div className="card">
+        <div className="card-title"><span className="icon">📥</span> Sparks I've Received</div>
+        {historyReceived.length === 0 ? (
+          <div className="empty-state"><div className="icon">📥</div><p>No sparks received yet</p></div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>From</th>
+                  <th>✨</th>
+                  <th>Reason</th>
+                  <th>Vests On</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyReceived.map(txn => (
+                  <tr key={txn.id}>
+                    <td style={{fontWeight:600}}>
+                      {txn.from_employee
+                        ? `${txn.from_employee.first_name} ${txn.from_employee.last_name}`
+                        : <span style={{color:'var(--white-dim)'}}>Admin</span>}
+                    </td>
+                    <td><span className="spark-badge">✨ {txn.amount}</span></td>
+                    <td style={{fontSize:'0.82rem', color:'var(--white-dim)', maxWidth:'200px'}}>
+                      {txn.reason
+                        ? <span style={{color:'var(--white-soft)'}}>{txn.reason}</span>
+                        : <span style={{opacity:0.4}}>—</span>}
+                    </td>
+                    <td style={{fontSize:'0.8rem'}}>{txn.vesting_date || '—'}</td>
+                    <td><span className={`chip chip-${txn.vested ? 'green' : 'gold'}`}>{txn.vested ? 'Vested' : 'Pending'}</span></td>
+                    <td style={{fontSize:'0.8rem', color:'var(--white-dim)', whiteSpace:'nowrap'}}>
                       {new Date(txn.created_at).toLocaleDateString()}
                     </td>
                   </tr>
