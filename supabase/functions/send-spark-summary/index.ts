@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'DDE Spark Portal <sparks@yourdomain.com>',
+        from: 'DDE Spark Portal <sparks@dubaldo.com>',
         to: emp.email,
         subject: `Your DDE Spark Summary — ${periodStart} to ${periodEnd}`,
         html,
