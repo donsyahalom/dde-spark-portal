@@ -29,7 +29,7 @@ export function AuthProvider({ children }) {
     if (error || !data) return { error: 'Invalid email or password' }
     if (data.password_hash !== password) return { error: 'Invalid email or password' }
 
-    // Process daily reset and vesting on login
+    // Process daily reset (CT timezone) and vesting on login
     await supabase.rpc('reset_daily_sparks')
     await supabase.rpc('process_vesting')
 

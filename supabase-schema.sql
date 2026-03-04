@@ -66,20 +66,45 @@ CREATE TABLE IF NOT EXISTS pending_vesting (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Per-recipient daily spark tracking
+-- Enforces the max-2-sparks-per-person-per-day rule
+CREATE TABLE IF NOT EXISTS daily_given (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  from_employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
+  to_employee_id UUID REFERENCES employees(id) ON DELETE CASCADE,
+  given_date DATE NOT NULL,   -- stored as Connecticut (ET) date
+  amount INTEGER DEFAULT 0,
+  UNIQUE(from_employee_id, to_employee_id, given_date)
+);
+
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_spark_transactions_to ON spark_transactions(to_employee_id);
 CREATE INDEX IF NOT EXISTS idx_spark_transactions_from ON spark_transactions(from_employee_id);
 CREATE INDEX IF NOT EXISTS idx_spark_transactions_date ON spark_transactions(created_at);
 CREATE INDEX IF NOT EXISTS idx_pending_vesting_employee ON pending_vesting(employee_id);
 CREATE INDEX IF NOT EXISTS idx_pending_vesting_date ON pending_vesting(vests_on);
+CREATE INDEX IF NOT EXISTS idx_daily_given_from ON daily_given(from_employee_id, given_date);
 
--- Function to process daily resets (called via cron or on login)
+-- Reset function using Connecticut (America/New_York) timezone.
+-- daily_sparks_remaining is seeded from each employee's daily_accrual value.
 CREATE OR REPLACE FUNCTION reset_daily_sparks()
 RETURNS void AS $$
+DECLARE
+  ct_today DATE;
 BEGIN
-  UPDATE employees 
-  SET daily_sparks_remaining = 2, last_daily_reset = CURRENT_DATE
-  WHERE last_daily_reset < CURRENT_DATE AND is_admin = FALSE;
+  ct_today := (NOW() AT TIME ZONE 'America/New_York')::DATE;
+  UPDATE employees
+  SET daily_sparks_remaining = daily_accrual,
+      last_daily_reset = ct_today
+  WHERE last_daily_reset < ct_today AND is_admin = FALSE;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Helper: returns today's date in Connecticut time (callable from client)
+CREATE OR REPLACE FUNCTION get_ct_today()
+RETURNS DATE AS $$
+BEGIN
+  RETURN (NOW() AT TIME ZONE 'America/New_York')::DATE;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -120,5 +145,7 @@ GRANT ALL ON employees TO anon;
 GRANT ALL ON spark_transactions TO anon;
 GRANT ALL ON pending_vesting TO anon;
 GRANT ALL ON settings TO anon;
+GRANT ALL ON daily_given TO anon;
 GRANT EXECUTE ON FUNCTION reset_daily_sparks() TO anon;
 GRANT EXECUTE ON FUNCTION process_vesting() TO anon;
+GRANT EXECUTE ON FUNCTION get_ct_today() TO anon;

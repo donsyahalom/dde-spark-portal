@@ -3,6 +3,9 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { addDays, format } from 'date-fns'
 
+// Max sparks any one person can receive from you in a single day
+const PER_PERSON_DAILY_CAP = 2
+
 export default function EmployeePage() {
   const { currentUser, refreshUser } = useAuth()
   const [employees, setEmployees] = useState([])
@@ -13,10 +16,12 @@ export default function EmployeePage() {
   const [loading, setLoading] = useState(false)
   const [history, setHistory] = useState([])
   const [me, setMe] = useState(currentUser)
+  // Map of to_employee_id -> sparks already given to them today (CT date)
+  const [givenToday, setGivenToday] = useState({})
+  const [ctToday, setCtToday] = useState(null)
 
   useEffect(() => {
     fetchData()
-    // Realtime subscription for own data
     const channel = supabase
       .channel('employee-self')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'employees', filter: `id=eq.${currentUser.id}` }, async () => {
@@ -28,7 +33,16 @@ export default function EmployeePage() {
   }, [])
 
   const fetchData = async () => {
-    // Get settings
+    // Run CT-based daily reset and vesting (handles midnight crossover)
+    await supabase.rpc('reset_daily_sparks')
+    await supabase.rpc('process_vesting')
+
+    // Get today's authoritative CT date from DB
+    const { data: todayData } = await supabase.rpc('get_ct_today')
+    const today = todayData || new Date().toISOString().split('T')[0]
+    setCtToday(today)
+
+    // Settings
     const { data: settingsData } = await supabase.from('settings').select('*')
     if (settingsData) {
       const obj = {}
@@ -36,7 +50,7 @@ export default function EmployeePage() {
       setSettings({ vesting_period_days: parseInt(obj.vesting_period_days || 30) })
     }
 
-    // Get other employees
+    // Other employees
     const { data: emps } = await supabase
       .from('employees')
       .select('id, first_name, last_name')
@@ -45,7 +59,19 @@ export default function EmployeePage() {
       .order('last_name')
     if (emps) setEmployees(emps)
 
-    // Get my history (sparks I gave)
+    // Per-recipient given counts for today (CT date)
+    const { data: givenRows } = await supabase
+      .from('daily_given')
+      .select('to_employee_id, amount')
+      .eq('from_employee_id', currentUser.id)
+      .eq('given_date', today)
+    if (givenRows) {
+      const map = {}
+      givenRows.forEach(r => { map[r.to_employee_id] = r.amount })
+      setGivenToday(map)
+    }
+
+    // Giving history
     const { data: txns } = await supabase
       .from('spark_transactions')
       .select(`*, to_employee:to_employee_id(first_name, last_name)`)
@@ -54,19 +80,28 @@ export default function EmployeePage() {
       .limit(20)
     if (txns) setHistory(txns)
 
-    // Refresh own data
+    // Refresh own row (picks up the CT-reset daily_sparks_remaining)
     const updated = await refreshUser()
     if (updated) setMe(updated)
+  }
+
+  const alreadyGivenToSelected = selectedEmp ? (givenToday[selectedEmp] || 0) : 0
+  const perPersonRemaining = PER_PERSON_DAILY_CAP - alreadyGivenToSelected
+  const dailyRemaining = me?.daily_sparks_remaining || 0
+  // Actual ceiling = the tighter of the two limits
+  const maxCanGive = Math.max(0, Math.min(perPersonRemaining, dailyRemaining))
+
+  const handleSelectEmp = (id) => {
+    setSelectedEmp(id)
+    setAmount(1)
+    setMessage(null)
   }
 
   const handleAssign = async () => {
     if (!selectedEmp) { setMessage({ type: 'error', text: 'Please select an employee' }); return }
     const numAmount = parseInt(amount)
-    if (numAmount < 1) { setMessage({ type: 'error', text: 'Amount must be at least 1' }); return }
-
-    const freshMe = me
-    if ((freshMe.daily_sparks_remaining || 0) < numAmount) {
-      setMessage({ type: 'error', text: `You only have ${freshMe.daily_sparks_remaining || 0} sparks remaining today` })
+    if (numAmount < 1 || numAmount > maxCanGive) {
+      setMessage({ type: 'error', text: `You can give at most ${maxCanGive} spark${maxCanGive !== 1 ? 's' : ''} to this person today` })
       return
     }
 
@@ -75,7 +110,7 @@ export default function EmployeePage() {
 
     const vestingDate = format(addDays(new Date(), settings.vesting_period_days), 'yyyy-MM-dd')
 
-    // Insert transaction
+    // Insert transaction record
     const { data: txn, error: txnError } = await supabase
       .from('spark_transactions')
       .insert({
@@ -91,7 +126,7 @@ export default function EmployeePage() {
 
     if (txnError) { setLoading(false); setMessage({ type: 'error', text: 'Failed to assign sparks' }); return }
 
-    // Add to pending vesting
+    // Queue for vesting
     await supabase.from('pending_vesting').insert({
       employee_id: selectedEmp,
       amount: numAmount,
@@ -99,7 +134,7 @@ export default function EmployeePage() {
       transaction_id: txn.id
     })
 
-    // Update recipient unvested sparks
+    // Increment recipient's unvested total
     const { data: recipient } = await supabase.from('employees').select('unvested_sparks').eq('id', selectedEmp).single()
     await supabase.from('employees')
       .update({ unvested_sparks: (recipient?.unvested_sparks || 0) + numAmount, updated_at: new Date().toISOString() })
@@ -107,11 +142,22 @@ export default function EmployeePage() {
 
     // Deduct from my daily allowance
     await supabase.from('employees')
-      .update({ daily_sparks_remaining: Math.max(0, (freshMe.daily_sparks_remaining||0) - numAmount), updated_at: new Date().toISOString() })
+      .update({ daily_sparks_remaining: Math.max(0, dailyRemaining - numAmount), updated_at: new Date().toISOString() })
       .eq('id', currentUser.id)
 
+    // Upsert per-recipient daily_given (insert or add to existing)
+    await supabase.from('daily_given').upsert({
+      from_employee_id: currentUser.id,
+      to_employee_id: selectedEmp,
+      given_date: ctToday,
+      amount: alreadyGivenToSelected + numAmount
+    }, { onConflict: 'from_employee_id,to_employee_id,given_date' })
+
     const empName = employees.find(e => e.id === selectedEmp)
-    setMessage({ type: 'success', text: `✨ ${numAmount} spark${numAmount>1?'s':''} assigned to ${empName?.first_name}! Vests on ${vestingDate}.` })
+    setMessage({
+      type: 'success',
+      text: `✨ ${numAmount} spark${numAmount > 1 ? 's' : ''} given to ${empName?.first_name}! Vests on ${vestingDate}.`
+    })
     setLoading(false)
     setSelectedEmp('')
     setAmount(1)
@@ -119,6 +165,7 @@ export default function EmployeePage() {
   }
 
   const totalSparks = (me?.vested_sparks || 0) + (me?.unvested_sparks || 0)
+  const dailyAllowance = me?.daily_accrual || 0
 
   return (
     <div className="fade-in">
@@ -139,8 +186,9 @@ export default function EmployeePage() {
           <div className="stat-label">Pending Vesting</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value" style={{color:me?.daily_sparks_remaining > 0 ? 'var(--green-bright)' : 'var(--red)'}}>
-            {me?.daily_sparks_remaining || 0}
+          <div className="stat-value" style={{color: dailyRemaining > 0 ? 'var(--green-bright)' : 'var(--red)'}}>
+            {dailyRemaining}
+            <span style={{fontSize:'1rem', color:'var(--white-dim)'}}> / {dailyAllowance}</span>
           </div>
           <div className="stat-label">Daily Sparks Left</div>
         </div>
@@ -149,34 +197,71 @@ export default function EmployeePage() {
       <div className="card" style={{marginBottom:'20px'}}>
         <div className="card-title"><span className="icon">✨</span> Give a Spark</div>
         {message && <div className={`alert alert-${message.type}`}>{message.text}</div>}
-        {(me?.daily_sparks_remaining || 0) === 0 ? (
-          <div className="alert alert-warning">You've used all your daily sparks! They reset tomorrow.</div>
+
+        {dailyRemaining === 0 ? (
+          <div className="alert alert-warning">
+            🌙 You've used all your daily sparks! They reset at midnight <strong>Connecticut time</strong>.
+          </div>
         ) : (
           <>
-            <p style={{color:'var(--white-dim)', fontSize:'0.85rem', marginBottom:'20px'}}>
-              You can give up to <strong style={{color:'var(--gold)'}}>2 sparks per day</strong> total.
-              Sparks vest after <strong style={{color:'var(--gold)'}}>{settings.vesting_period_days} days</strong> from assignment.
-            </p>
+            <div className="alert alert-warning" style={{marginBottom:'16px'}}>
+              <strong>Daily rules:</strong> You have <strong>{dailyAllowance} sparks to give per day</strong> total,
+              with a maximum of <strong>2 sparks to any one person per day</strong>.
+              Sparks vest <strong>{settings.vesting_period_days} days</strong> after assignment.
+              Allowance resets at midnight <strong>Connecticut time</strong>.
+            </div>
+
             <div className="form-grid">
               <div className="form-group">
                 <label className="form-label">Give Sparks To</label>
-                <select className="form-select" value={selectedEmp} onChange={e => setSelectedEmp(e.target.value)}>
+                <select className="form-select" value={selectedEmp} onChange={e => handleSelectEmp(e.target.value)}>
                   <option value="">Select employee...</option>
-                  {employees.map(e => (
-                    <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>
-                  ))}
+                  {employees.map(e => {
+                    const alreadyGiven = givenToday[e.id] || 0
+                    const canStillGive = PER_PERSON_DAILY_CAP - alreadyGiven
+                    const suffix = canStillGive <= 0
+                      ? ' — limit reached today'
+                      : alreadyGiven > 0
+                        ? ` (${alreadyGiven} given today)`
+                        : ''
+                    return (
+                      <option key={e.id} value={e.id} disabled={canStillGive <= 0 || dailyRemaining <= 0}>
+                        {e.first_name} {e.last_name}{suffix}
+                      </option>
+                    )
+                  })}
                 </select>
+                {selectedEmp && alreadyGivenToSelected > 0 && perPersonRemaining > 0 && (
+                  <p style={{fontSize:'0.78rem', color:'var(--gold)', marginTop:'6px'}}>
+                    You've already given {alreadyGivenToSelected} spark{alreadyGivenToSelected > 1 ? 's' : ''} to this person today — {perPersonRemaining} more allowed.
+                  </p>
+                )}
               </div>
+
               <div className="form-group">
-                <label className="form-label">Amount (max {me?.daily_sparks_remaining || 0})</label>
-                <select className="form-select" value={amount} onChange={e => setAmount(e.target.value)}>
-                  {[...Array(Math.min(me?.daily_sparks_remaining || 0, 2))].map((_, i) => (
-                    <option key={i+1} value={i+1}>{i+1}</option>
-                  ))}
+                <label className="form-label">
+                  Amount
+                  {selectedEmp && maxCanGive > 0 && (
+                    <span style={{color:'var(--white-dim)', fontWeight:400, textTransform:'none', letterSpacing:0}}>
+                      {' '}(max {maxCanGive})
+                    </span>
+                  )}
+                </label>
+                <select className="form-select" value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  disabled={!selectedEmp || maxCanGive <= 0}>
+                  {maxCanGive > 0
+                    ? [...Array(maxCanGive)].map((_, i) => (
+                        <option key={i + 1} value={i + 1}>{i + 1}</option>
+                      ))
+                    : <option value={0}>0 — limit reached</option>
+                  }
                 </select>
               </div>
             </div>
-            <button className="btn btn-gold" onClick={handleAssign} disabled={loading || !selectedEmp}>
+
+            <button className="btn btn-gold" onClick={handleAssign}
+              disabled={loading || !selectedEmp || maxCanGive <= 0}>
               {loading ? 'Sending...' : '✨ Give Spark'}
             </button>
           </>
