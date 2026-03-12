@@ -226,3 +226,38 @@ GRANT EXECUTE ON FUNCTION apply_go_live_reset() TO anon;
 
 -- v4.1 addition: minimum redemption amount setting
 INSERT INTO settings (key, value) VALUES ('min_redemption_amount', '20') ON CONFLICT (key) DO NOTHING;
+
+-- ── Migration v4 addendum: custom_lists table ──────────────────────────────
+CREATE TABLE IF NOT EXISTS custom_lists (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  list_type TEXT NOT NULL,   -- 'job_grade' | 'job_title'
+  value TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 999,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(list_type, value)
+);
+GRANT ALL ON custom_lists TO anon;
+ALTER TABLE custom_lists DISABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_custom_lists_type ON custom_lists(list_type, sort_order);
+
+-- Seed the default job grades (sort_order matches position in the hardcoded array)
+INSERT INTO custom_lists (list_type, value, sort_order) VALUES
+  ('job_grade','Pre1',1),
+  ('job_grade','A1',2),('job_grade','A2',3),('job_grade','A3',4),('job_grade','A4',5),
+  ('job_grade','J1',6),('job_grade','J2',7),('job_grade','J3',8),('job_grade','J4',9),
+  ('job_grade','F1',10),('job_grade','F2',11),('job_grade','F3',12),('job_grade','F4',13),
+  ('job_grade','P1',14),('job_grade','P2',15),('job_grade','P3',16),('job_grade','P4',17),
+  ('job_grade','Owner',18)
+ON CONFLICT (list_type, value) DO NOTHING;
+
+INSERT INTO custom_lists (list_type, value, sort_order) VALUES
+  ('job_title','Pre-Apprentice',1),
+  ('job_title','Apprentice',2),
+  ('job_title','Journeyman',3),
+  ('job_title','Foreman',4),
+  ('job_title','Project Manager',5),
+  ('job_title','Owner',6)
+ON CONFLICT (list_type, value) DO NOTHING;
+
+-- min_redemption_amount setting
+INSERT INTO settings (key, value) VALUES ('min_redemption_amount','20') ON CONFLICT (key) DO NOTHING;

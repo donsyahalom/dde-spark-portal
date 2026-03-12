@@ -4,17 +4,34 @@ import { useAuth } from '../context/AuthContext'
 import { assignSparks } from '../lib/sparkHelpers'
 import { buildReason, getRangeWindow } from '../lib/constants'
 
+// ── Title hierarchy for "Title / Rank" sort ───────────────────────────────────
+// Groups are in display order (top of leaderboard = index 0).
+// Any title not listed here goes to the end, alphabetically within that bucket.
+const TITLE_HIERARCHY = [
+  'Pre-Apprentice',
+  'Apprentice',
+  'Journeyman',
+  'Foreman',
+  'Project Manager',
+  'Owner',
+]
+
+function getTitleOrder(title) {
+  const idx = TITLE_HIERARCHY.findIndex(t => t.toLowerCase() === (title||'').toLowerCase())
+  return idx >= 0 ? idx : TITLE_HIERARCHY.length // unknown titles go last
+}
+
 const SORT_OPTIONS = [
-  { value:'name',    label:'A–Z Name' },
+  { value:'title',   label:'Title / Rank' },
   { value:'ranking', label:'🏆 Ranking' },
-  { value:'title',   label:'Job Title A–Z' },
+  { value:'name',    label:'A–Z Name' },
 ]
 
 export default function LeaderboardPage() {
   const { currentUser } = useAuth()
   const [employees, setEmployees] = useState([])
   const [loading, setLoading] = useState(true)
-  const [sortMode, setSortMode] = useState('ranking')
+  const [sortMode, setSortMode] = useState('title')   // default: Title / Rank
   const [titleFilter, setTitleFilter] = useState('')
   const [txnLog, setTxnLog] = useState([])
   const [txnLoading, setTxnLoading] = useState(true)
@@ -174,18 +191,44 @@ export default function LeaderboardPage() {
     return empTotalsInRange[emp.id] || 0
   }
 
+  // ── Tie-breaking helper: reverse alphabetical by last name then first name ──
+  // Used by both 'ranking' and 'title' sorts
+  const tieBreak = (a, b) => b.last_name.localeCompare(a.last_name) || b.first_name.localeCompare(a.first_name)
+
+  // ── Global rank (by total, ties broken reverse-alpha) ─────────────────────
+  const rankByTotal = [...employees].sort((a,b) => {
+    const diff = getDisplayTotal(b) - getDisplayTotal(a)
+    return diff !== 0 ? diff : tieBreak(a, b)
+  })
+  const getRank = (emp) => rankByTotal.findIndex(e => e.id === emp.id) + 1
+
   let sorted = [...employees]
   if (titleFilter) sorted = sorted.filter(e => e.job_title === titleFilter)
-  sorted.sort((a,b) => {
-    if (sortMode === 'ranking') return getDisplayTotal(b) - getDisplayTotal(a)
-    if (sortMode === 'title') return (a.job_title||'').localeCompare(b.job_title||'')||a.last_name.localeCompare(b.last_name)
-    return a.last_name.localeCompare(b.last_name)||a.first_name.localeCompare(b.first_name)
+
+  sorted.sort((a, b) => {
+    if (sortMode === 'ranking') {
+      const diff = getDisplayTotal(b) - getDisplayTotal(a)
+      return diff !== 0 ? diff : tieBreak(a, b)
+    }
+    if (sortMode === 'title') {
+      // 1. Title group order (Pre-Apprentice first … Owner last)
+      const titleDiff = getTitleOrder(a.job_title) - getTitleOrder(b.job_title)
+      if (titleDiff !== 0) return titleDiff
+      // 2. Within group: highest sparks first
+      const sparkDiff = getDisplayTotal(b) - getDisplayTotal(a)
+      if (sparkDiff !== 0) return sparkDiff
+      // 3. Tie: reverse alphabetical
+      return tieBreak(a, b)
+    }
+    // 'name' sort: A–Z last then first
+    return a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name)
   })
+
   const allTotals = sorted.map(getDisplayTotal)
   const maxSparks = Math.max(...allTotals, 1)
-  const rankByTotal = [...employees].sort((a,b)=>getDisplayTotal(b)-getDisplayTotal(a))
-  const getRank = (emp) => rankByTotal.findIndex(e=>e.id===emp.id) + 1
-  const usedTitles = [...new Set(employees.map(e=>e.job_title).filter(Boolean))].sort()
+  // Titles for filter buttons, ordered by hierarchy then alpha for unknowns
+  const usedTitles = [...new Set(employees.map(e => e.job_title).filter(Boolean))]
+    .sort((a, b) => getTitleOrder(a) - getTitleOrder(b) || a.localeCompare(b))
   const isAdmin = currentUser?.is_admin
 
   return (
@@ -225,7 +268,7 @@ export default function LeaderboardPage() {
                       <div style={{display:'flex',alignItems:'center',gap:'6px',flexWrap:'wrap'}}>
                         <span style={{fontWeight:700,fontSize:'0.95rem'}}>{emp.first_name} {emp.last_name}</span>
                         {emp.job_title && <span style={{fontSize:'0.68rem',color:'var(--gold-dark)',background:'rgba(240,192,64,0.1)',border:'1px solid rgba(240,192,64,0.2)',borderRadius:'10px',padding:'1px 6px'}}>{emp.job_title}</span>}
-                        {emp.job_grade && <span style={{fontSize:'0.65rem',color:'var(--white-dim)'}}>{emp.job_grade}</span>}
+                        {isAdmin && emp.job_grade && <span style={{fontSize:'0.65rem',color:'var(--white-dim)'}}>{emp.job_grade}</span>}
                       </div>
                       <div style={{background:'rgba(0,0,0,0.4)',borderRadius:'10px',height:'4px',overflow:'hidden',marginTop:'4px'}}>
                         <div style={{height:'100%',background:'linear-gradient(90deg,var(--gold-dark),var(--gold))',borderRadius:'10px',width:`${pct}%`,transition:'width 0.5s ease'}}></div>

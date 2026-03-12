@@ -1,31 +1,66 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { JOB_GRADES, JOB_TITLES, MANAGEMENT_GRADES, FREQUENCY_OPTIONS, CARRIERS, LEADERBOARD_RANGE_OPTIONS, getFrequencyLabel } from '../lib/constants'
+import { MANAGEMENT_GRADES, FREQUENCY_OPTIONS, CARRIERS, LEADERBOARD_RANGE_OPTIONS, getFrequencyLabel } from '../lib/constants'
 import { sendTestNotification, isBeforeGoLive } from '../lib/notificationService'
 
+// ── Hardcoded fallback lists (used only if DB is empty) ───────────────────────
+const DEFAULT_GRADES = ['Pre1','A1','A2','A3','A4','J1','J2','J3','J4','F1','F2','F3','F4','P1','P2','P3','P4','Owner']
+const DEFAULT_TITLES = ['Pre-Apprentice','Apprentice','Journeyman','Foreman','Project Manager','Owner']
+
+// ── Smart insert: figure out the best sort_order for a new list value ─────────
+// Strategy: parse prefix letters + trailing number, find the nearest predecessor
+// e.g. "A5" → should go after "A4"; "J0" → before "J1"; "Z1" → after all Z items or end
+function smartInsertOrder(newVal, existingItems) {
+  // Normalise: split into letter-prefix and numeric suffix
+  const parse = v => {
+    const m = v.match(/^([A-Za-z]+)(\d+)$/)
+    if (m) return { prefix: m[1].toUpperCase(), num: parseInt(m[2]), raw: v }
+    return { prefix: v.toUpperCase(), num: null, raw: v }
+  }
+  const nv = parse(newVal)
+
+  // Find all items with same prefix
+  const samePrefix = existingItems.filter(it => {
+    const p = parse(it.value)
+    return p.prefix === nv.prefix && p.num !== null
+  }).sort((a,b) => parse(a.value).num - parse(b.value).num)
+
+  if (samePrefix.length > 0 && nv.num !== null) {
+    // Insert after the largest same-prefix item whose number < new number
+    const predecessor = [...samePrefix].filter(it => parse(it.value).num < nv.num).pop()
+    if (predecessor) {
+      // Shift everything after predecessor up by 1, insert new item right after
+      const afterOrder = predecessor.sort_order + 1
+      return afterOrder // caller handles shifting
+    }
+    // New number is smallest in its prefix group → insert before first of group
+    const first = samePrefix[0]
+    return first.sort_order // caller handles shifting
+  }
+
+  // No matching prefix → append at end
+  const maxOrder = existingItems.reduce((m, it) => Math.max(m, it.sort_order), 0)
+  return maxOrder + 1
+}
+
 // ── Dual-scrollbar wrapper ────────────────────────────────────────────────────
-// Renders a phantom top scrollbar that mirrors the real bottom one.
 function DualScrollTable({ children }) {
-  const outerRef = useRef(null)   // real scroll container (bottom)
-  const topRef   = useRef(null)   // phantom top bar
+  const outerRef = useRef(null)
+  const topRef   = useRef(null)
   const syncingOuter = useRef(false)
   const syncingTop   = useRef(false)
-
-  // Keep phantom width in sync with table width
   const phantomRef = useRef(null)
   const syncWidth = useCallback(() => {
     if (!outerRef.current || !phantomRef.current) return
     phantomRef.current.style.width = outerRef.current.scrollWidth + 'px'
   }, [])
-
   useEffect(() => {
     syncWidth()
     const ro = new ResizeObserver(syncWidth)
     if (outerRef.current) ro.observe(outerRef.current)
     return () => ro.disconnect()
   }, [syncWidth])
-
   const onTopScroll = () => {
     if (syncingTop.current) { syncingTop.current = false; return }
     syncingOuter.current = true
@@ -36,15 +71,12 @@ function DualScrollTable({ children }) {
     syncingTop.current = true
     if (topRef.current && outerRef.current) topRef.current.scrollLeft = outerRef.current.scrollLeft
   }
-
   return (
     <div>
-      {/* Top phantom scrollbar */}
       <div ref={topRef} onScroll={onTopScroll}
-        style={{overflowX:'auto',overflowY:'hidden',height:'16px',marginBottom:'2px',background:'transparent'}}>
+        style={{overflowX:'auto',overflowY:'hidden',height:'16px',marginBottom:'2px'}}>
         <div ref={phantomRef} style={{height:'1px'}}></div>
       </div>
-      {/* Real table */}
       <div ref={outerRef} onScroll={onOuterScroll} style={{overflowX:'auto',paddingBottom:'4px'}}>
         {children}
       </div>
@@ -52,6 +84,7 @@ function DualScrollTable({ children }) {
   )
 }
 
+// ── TYPE_LABELS ───────────────────────────────────────────────────────────────
 const TYPE_LABELS = {
   assign:       { label:'Peer Spark',  color:'gold' },
   admin_adjust: { label:'Admin Adj.',  color:'red'  },
@@ -59,9 +92,9 @@ const TYPE_LABELS = {
   initial:      { label:'Initial',     color:'gold' },
   daily_accrual:{ label:'Accrual',     color:'gold' },
 }
-
 const REMINDER_PRESETS = [24, 48, 72, 12, 6, 3, 1]
 
+// ─────────────────────────────────────────────────────────────────────────────
 export default function AdminPage() {
   const { currentUser } = useAuth()
   const [tab, setTab] = useState('employees')
@@ -71,6 +104,24 @@ export default function AdminPage() {
   const [message, setMessage] = useState(null)
   const [loading, setLoading] = useState(false)
   const [beforeGoLive, setBeforeGoLive] = useState(true)
+
+  // ── Live lists (from DB) ──────────────────────────────────────────────────
+  const [gradeItems, setGradeItems] = useState([])  // { value, sort_order }
+  const [titleItems, setTitleItems] = useState([])
+  const grades = ['', ...gradeItems.map(g => g.value)]
+  const titles = ['', ...titleItems.map(t => t.value)]
+
+  // ── List editor state ────────────────────────────────────────────────────
+  const [newGrade, setNewGrade] = useState('')
+  const [newTitle, setNewTitle] = useState('')
+  const [listSaving, setListSaving] = useState(false)
+
+  // ── Batch unknown-value prompt queue ─────────────────────────────────────
+  // Each item: { listType:'job_grade'|'job_title', value, rowCount }
+  const [unknownQueue, setUnknownQueue] = useState([])   // remaining to ask about
+  const [pendingBatchLines, setPendingBatchLines] = useState([])  // stored for after prompts resolve
+  const [batchRunning, setBatchRunning] = useState(false)
+  const [batchErrors, setBatchErrors] = useState([])   // shown in UI after import
 
   const emptyForm = { first_name:'', last_name:'', email:'', phone:'', carrier:'', initial_sparks:0, daily_accrual:0, job_grade:'', job_title:'', is_management:false, has_spark_list:false, notify_email:true, notify_sms:false }
   const [form, setForm] = useState(emptyForm)
@@ -85,7 +136,6 @@ export default function AdminPage() {
   const [testChannel, setTestChannel] = useState('email')
   const [testLoading, setTestLoading] = useState(false)
   const [reminderOffsets, setReminderOffsets] = useState(['48','24',''])
-  // Reminder time warning
   const [reminderWarning, setReminderWarning] = useState(null)
 
   // Reports
@@ -111,41 +161,213 @@ export default function AdminPage() {
       while (parts.length < 3) parts.push('')
       setReminderOffsets(parts.slice(0,3))
     }
+    await fetchLists()
     const before = await isBeforeGoLive()
     setBeforeGoLive(before)
   }
 
-  const sortedEmployees = [...employees].sort((a,b) => {
-    if (sortMode === 'ranking') return ((b.vested_sparks||0)+(b.unvested_sparks||0)) - ((a.vested_sparks||0)+(a.unvested_sparks||0))
-    return a.last_name.localeCompare(b.last_name)||a.first_name.localeCompare(b.first_name)
-  })
-
-  const showMsg = (type, text) => { setMessage({type,text}); setTimeout(()=>setMessage(null), 5000) }
-
-  const saveSettings = async () => {
-    setLoading(true)
-    const offsets = reminderOffsets.filter(x=>x.trim()).join(',')
-    const allSettings = { ...settings, reminder_offsets: offsets }
-    for (const [key, value] of Object.entries(allSettings)) {
-      await supabase.from('settings').upsert({ key, value: String(value||'') }, { onConflict:'key' })
+  const fetchLists = async () => {
+    const { data } = await supabase.from('custom_lists').select('*').order('sort_order')
+    if (data) {
+      setGradeItems(data.filter(d => d.list_type === 'job_grade'))
+      setTitleItems(data.filter(d => d.list_type === 'job_title'))
     }
-    // Check reminder times if frequency != daily
-    const freq = settings.spark_frequency || 'daily'
-    if (freq !== 'daily') {
-      checkReminderWarnings(reminderOffsets, freq)
+  }
+
+  // ── Add a single value to a list, inserting at smartInsertOrder position ──
+  const addListItem = async (listType, value, existingItems) => {
+    const trimmed = value.trim()
+    if (!trimmed) return { error: 'Empty value' }
+    if (existingItems.find(it => it.value.toLowerCase() === trimmed.toLowerCase())) {
+      return { error: 'Already exists' }
     }
-    setLoading(false); showMsg('success', 'Settings saved!')
+    const insertOrder = smartInsertOrder(trimmed, existingItems)
+    // Shift existing items at or after insertOrder up by 1
+    const toShift = existingItems.filter(it => it.sort_order >= insertOrder)
+    for (const it of toShift) {
+      await supabase.from('custom_lists').update({ sort_order: it.sort_order + 1 }).eq('id', it.id)
+    }
+    const { error } = await supabase.from('custom_lists').insert({ list_type: listType, value: trimmed, sort_order: insertOrder })
+    return { error: error?.message }
+  }
+
+  const removeListItem = async (id) => {
+    await supabase.from('custom_lists').delete().eq('id', id)
+    fetchLists()
+  }
+
+  const handleAddGrade = async () => {
+    if (!newGrade.trim()) return
+    setListSaving(true)
+    const result = await addListItem('job_grade', newGrade, gradeItems)
+    setListSaving(false)
+    if (result.error) { showMsg('error', result.error); return }
+    setNewGrade(''); fetchLists()
+    showMsg('success', `Grade "${newGrade.trim()}" added`)
+  }
+
+  const handleAddTitle = async () => {
+    if (!newTitle.trim()) return
+    setListSaving(true)
+    const result = await addListItem('job_title', newTitle, titleItems)
+    setListSaving(false)
+    if (result.error) { showMsg('error', result.error); return }
+    setNewTitle(''); fetchLists()
+    showMsg('success', `Title "${newTitle.trim()}" added`)
+  }
+
+  // ── BATCH pre-validation ───────────────────────────────────────────────────
+  // Scan lines for unknown grades/titles, build a queue of prompts, then run import
+  const handleBatchClick = async () => {
+    const lines = batchText.trim().split('\n').filter(l => l.trim())
+    if (!lines.length) return
+    setBatchErrors([])
+
+    // Collect unknown values across all lines
+    const unknownGrades = new Map()   // value -> count
+    const unknownTitles = new Map()
+
+    const knownGrades = new Set(gradeItems.map(g => g.value.toLowerCase()))
+    const knownTitles = new Set(titleItems.map(t => t.value.toLowerCase()))
+
+    for (const line of lines) {
+      const parts = line.split(',').map(s => s?.trim())
+      const grade = parts[6] || ''
+      const title = parts[7] || ''
+      if (grade && !knownGrades.has(grade.toLowerCase())) {
+        unknownGrades.set(grade, (unknownGrades.get(grade) || 0) + 1)
+      }
+      if (title && !knownTitles.has(title.toLowerCase())) {
+        unknownTitles.set(title, (unknownTitles.get(title) || 0) + 1)
+      }
+    }
+
+    // Build prompt queue
+    const queue = []
+    unknownGrades.forEach((count, value) => queue.push({ listType: 'job_grade', value, rowCount: count }))
+    unknownTitles.forEach((count, value) => queue.push({ listType: 'job_title', value, rowCount: count }))
+
+    if (queue.length === 0) {
+      // No unknowns — run import directly
+      await runBatchImport(lines)
+    } else {
+      // Store lines and show first prompt
+      setPendingBatchLines(lines)
+      setUnknownQueue(queue)
+    }
+  }
+
+  // Called when user clicks Yes/No on a single unknown-value prompt
+  const handleUnknownResponse = async (addIt) => {
+    const [current, ...rest] = unknownQueue
+    if (addIt) {
+      setListSaving(true)
+      const items = current.listType === 'job_grade' ? gradeItems : titleItems
+      await addListItem(current.listType, current.value, items)
+      await fetchLists()
+      setListSaving(false)
+    }
+    if (rest.length === 0) {
+      // All prompts answered — run the import
+      setUnknownQueue([])
+      await runBatchImport(pendingBatchLines)
+      setPendingBatchLines([])
+    } else {
+      setUnknownQueue(rest)
+    }
+  }
+
+  const runBatchImport = async (lines) => {
+    setBatchRunning(true)
+    setBatchErrors([])
+    let added = 0, updated = 0, errors = 0, errorDetails = []
+
+    // Re-fetch latest lists so newly-added values are included
+    const { data: freshLists } = await supabase.from('custom_lists').select('*').order('sort_order')
+    const liveGrades = new Set((freshLists || []).filter(d => d.list_type === 'job_grade').map(d => d.value.toLowerCase()))
+    const liveTitles = new Set((freshLists || []).filter(d => d.list_type === 'job_title').map(d => d.value.toLowerCase()))
+
+    for (const line of lines) {
+      const parts = line.split(',').map(s => s?.trim())
+      const [fn, ln, phone, email, init, accrual, grade, title, isMgmt, hasList, notifEmail, notifSms, carrier] = parts
+      if (!fn || !ln || !email) {
+        errors++
+        const nameStr = [fn, ln].filter(Boolean).join(' ') || '(unknown name)'
+        errorDetails.push({ name: nameStr, email: email || '(no email)', reason: 'Missing required fields (first name, last name, or email)' })
+        continue
+      }
+
+      const emailLower = email.toLowerCase()
+      const nameStr = `${fn} ${ln}`
+      const a = parseInt(accrual) || 0
+      const initSparks = parseInt(init) || 0
+      const isManagementVal = isMgmt?.toLowerCase() === 'true' || MANAGEMENT_GRADES.includes(grade || '')
+      const hasSparkListVal = hasList?.toLowerCase() === 'true'
+      const notifyEmailVal = notifEmail?.toLowerCase() !== 'false'
+      const notifySmsVal = notifSms?.toLowerCase() === 'true'
+      const carrierVal = carrier || ''
+
+      const { data: existing } = await supabase.from('employees').select('id, vested_sparks, unvested_sparks').eq('email', emailLower).single()
+
+      if (existing) {
+        const updatePayload = {
+          first_name: fn, last_name: ln, phone: phone || '', email: emailLower,
+          daily_accrual: a, daily_sparks_remaining: a,
+          job_grade: grade || '', job_title: title || '',
+          is_management: isManagementVal, has_spark_list: hasSparkListVal,
+          notify_email: notifyEmailVal, notify_sms: notifySmsVal,
+          carrier: carrierVal, updated_at: new Date().toISOString()
+        }
+        if (initSparks > 0) updatePayload.unvested_sparks = initSparks
+        const { error } = await supabase.from('employees').update(updatePayload).eq('id', existing.id)
+        if (error) { errors++; errorDetails.push({ name: nameStr, email: emailLower, reason: error.message }) }
+        else updated++
+      } else {
+        const { error } = await supabase.from('employees').insert({
+          first_name: fn, last_name: ln, phone: phone || '', email: emailLower,
+          password_hash: 'spark123', must_change_password: true,
+          vested_sparks: 0, unvested_sparks: initSparks,
+          daily_accrual: a, daily_sparks_remaining: a,
+          job_grade: grade || '', job_title: title || '',
+          is_management: isManagementVal, has_spark_list: hasSparkListVal,
+          notify_email: notifyEmailVal, notify_sms: notifySmsVal, carrier: carrierVal,
+        })
+        if (error) { errors++; errorDetails.push({ name: nameStr, email: emailLower, reason: error.message }) }
+        else added++
+      }
+    }
+
+    setBatchRunning(false)
+    if (errorDetails.length) setBatchErrors(errorDetails)
+    const summary = [`✅ ${added} added`, `🔄 ${updated} updated`, errors ? `❌ ${errors} failed` : ''].filter(Boolean).join(' · ')
+    showMsg(errors ? 'warning' : 'success', summary)
+    if (!errors) setBatchText('')
     fetchAll()
   }
 
+  const sortedEmployees = [...employees].sort((a, b) => {
+    if (sortMode === 'ranking') return ((b.vested_sparks||0)+(b.unvested_sparks||0)) - ((a.vested_sparks||0)+(a.unvested_sparks||0))
+    return a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name)
+  })
+
+  const showMsg = (type, text) => { setMessage({ type, text }); setTimeout(() => setMessage(null), 5000) }
+
+  const saveSettings = async () => {
+    setLoading(true)
+    const offsets = reminderOffsets.filter(x => x.trim()).join(',')
+    const allSettings = { ...settings, reminder_offsets: offsets }
+    for (const [key, value] of Object.entries(allSettings)) {
+      await supabase.from('settings').upsert({ key, value: String(value || '') }, { onConflict: 'key' })
+    }
+    const freq = settings.spark_frequency || 'daily'
+    if (freq !== 'daily') checkReminderWarnings(reminderOffsets, freq)
+    setLoading(false); showMsg('success', 'Settings saved!'); fetchAll()
+  }
+
   const checkReminderWarnings = (offsets, freq) => {
-    // Compute next reset and check if reminder would fire at odd hour
     const warnings = []
-    offsets.filter(x=>x).forEach(hrs => {
-      const hrsNum = parseFloat(hrs)
-      // Estimate what time of day the reminder fires (very rough)
-      // midnight CT - hrsNum hours = what hour of day?
-      const reminderHour = (24 - (hrsNum % 24)) % 24
+    offsets.filter(x => x).forEach(hrs => {
+      const reminderHour = (24 - (parseFloat(hrs) % 24)) % 24
       if (reminderHour > 21 || reminderHour < 7) {
         warnings.push(`${hrs}h reminder would fire around ${reminderHour}:00 CT — are you sure?`)
       }
@@ -153,17 +375,14 @@ export default function AdminPage() {
     if (warnings.length) setReminderWarning(warnings)
   }
 
-  // Go-live reset
   const handleGoLiveReset = async () => {
     const goLive = settings.go_live_date
     if (!goLive) { showMsg('error', 'Set a go-live date first'); return }
-    const now = new Date()
-    const glDate = new Date(goLive)
-    if (now < glDate) { showMsg('warning', `Go-live date is ${goLive} — reset won't happen until then`); return }
-    if (!window.confirm('⚠️ This will RESET all employee spark totals to 0. This cannot be undone. Are you sure?')) return
+    if (new Date() < new Date(goLive)) { showMsg('warning', `Go-live date is ${goLive} — not reached yet`); return }
+    if (!window.confirm('⚠️ This will RESET all employee spark totals to 0. Cannot be undone. Are you sure?')) return
     setLoading(true)
     await supabase.rpc('apply_go_live_reset')
-    setLoading(false); showMsg('success', 'Go-live reset applied! All spark totals are now 0.'); fetchAll()
+    setLoading(false); showMsg('success', 'Go-live reset applied!'); fetchAll()
   }
 
   const addEmployee = async (e) => {
@@ -173,7 +392,7 @@ export default function AdminPage() {
       first_name: form.first_name.trim(), last_name: form.last_name.trim(),
       email: form.email.toLowerCase().trim(), phone: form.phone.trim(), carrier: form.carrier,
       password_hash: 'spark123', must_change_password: true,
-      vested_sparks: 0, unvested_sparks: parseInt(form.initial_sparks)||0,
+      vested_sparks: 0, unvested_sparks: parseInt(form.initial_sparks) || 0,
       daily_accrual: accrual, daily_sparks_remaining: accrual,
       job_grade: form.job_grade, job_title: form.job_title,
       is_management: form.is_management || MANAGEMENT_GRADES.includes(form.job_grade),
@@ -186,72 +405,6 @@ export default function AdminPage() {
     setForm(emptyForm); fetchAll()
   }
 
-  const addBatch = async () => {
-    const lines = batchText.trim().split('\n').filter(l=>l.trim())
-    if (!lines.length) return
-    setLoading(true)
-    let added=0, updated=0, errors=0, errorDetails=[]
-
-    for (const line of lines) {
-      // Split by comma, trim each field
-      const parts = line.split(',').map(s=>s?.trim())
-      const [fn, ln, phone, email, init, accrual, grade, title, isMgmt, hasList, notifEmail, notifSms, carrier] = parts
-      if (!fn || !ln || !email) { errors++; errorDetails.push(`Missing required fields: ${line.substring(0,60)}`); continue }
-
-      const emailLower = email.toLowerCase()
-      const a = parseInt(accrual) || 0
-      const initSparks = parseInt(init) || 0
-      const isManagementVal = isMgmt?.toLowerCase()==='true' || MANAGEMENT_GRADES.includes(grade||'')
-      const hasSparkListVal = hasList?.toLowerCase()==='true'
-      const notifyEmailVal = notifEmail?.toLowerCase()!=='false'  // default true
-      const notifySmsVal = notifSms?.toLowerCase()==='true'       // default false
-      const carrierVal = carrier || ''
-
-      // Check if employee exists by email
-      const { data: existing } = await supabase.from('employees').select('id, vested_sparks, unvested_sparks').eq('email', emailLower).single()
-
-      if (existing) {
-        // UPDATE existing employee — replace all provided fields
-        const updatePayload = {
-          first_name: fn, last_name: ln, phone: phone||'', email: emailLower,
-          daily_accrual: a, daily_sparks_remaining: a,
-          job_grade: grade||'', job_title: title||'',
-          is_management: isManagementVal, has_spark_list: hasSparkListVal,
-          notify_email: notifyEmailVal, notify_sms: notifySmsVal,
-          carrier: carrierVal, updated_at: new Date().toISOString()
-        }
-        // Only update sparks if a non-zero initial value was provided
-        if (initSparks > 0) {
-          updatePayload.unvested_sparks = initSparks
-        }
-        const { error } = await supabase.from('employees').update(updatePayload).eq('id', existing.id)
-        if (error) { errors++; errorDetails.push(`Update failed for ${emailLower}: ${error.message}`) }
-        else updated++
-      } else {
-        // INSERT new employee
-        const { error } = await supabase.from('employees').insert({
-          first_name: fn, last_name: ln, phone: phone||'', email: emailLower,
-          password_hash: 'spark123', must_change_password: true,
-          vested_sparks: 0, unvested_sparks: initSparks,
-          daily_accrual: a, daily_sparks_remaining: a,
-          job_grade: grade||'', job_title: title||'',
-          is_management: isManagementVal, has_spark_list: hasSparkListVal,
-          notify_email: notifyEmailVal, notify_sms: notifySmsVal,
-          carrier: carrierVal,
-        })
-        if (error) { errors++; errorDetails.push(`Insert failed for ${emailLower}: ${error.message}`) }
-        else added++
-      }
-    }
-
-    setLoading(false)
-    const summary = [`✅ ${added} added`, `🔄 ${updated} updated`, errors ? `❌ ${errors} failed` : ''].filter(Boolean).join(' · ')
-    showMsg(errors ? 'warning' : 'success', summary)
-    if (errorDetails.length) console.error('Batch errors:', errorDetails)
-    if (!errors) setBatchText('')
-    fetchAll()
-  }
-
   const removeEmployee = async (emp) => {
     if (!window.confirm(`Remove ${emp.first_name} ${emp.last_name}? Cannot be undone.`)) return
     await supabase.from('employees').delete().eq('id', emp.id)
@@ -261,96 +414,93 @@ export default function AdminPage() {
   const openEdit = (emp) => {
     setEditEmp(emp)
     setEditValues({
-      first_name:emp.first_name, last_name:emp.last_name, email:emp.email, phone:emp.phone||'', carrier:emp.carrier||'',
-      vested_sparks:emp.vested_sparks||0, unvested_sparks:emp.unvested_sparks||0, redeemed_sparks:emp.redeemed_sparks||0,
-      daily_accrual:emp.daily_accrual||0, job_grade:emp.job_grade||'', job_title:emp.job_title||'',
-      is_management:emp.is_management||false, has_spark_list:emp.has_spark_list||false,
-      notify_email:emp.notify_email!==false, notify_sms:emp.notify_sms||false,
+      first_name: emp.first_name, last_name: emp.last_name, email: emp.email, phone: emp.phone || '', carrier: emp.carrier || '',
+      vested_sparks: emp.vested_sparks || 0, unvested_sparks: emp.unvested_sparks || 0,
+      daily_accrual: emp.daily_accrual || 0, job_grade: emp.job_grade || '', job_title: emp.job_title || '',
+      is_management: emp.is_management || false, has_spark_list: emp.has_spark_list || false,
+      notify_email: emp.notify_email !== false, notify_sms: emp.notify_sms || false,
     })
   }
 
   const saveEdit = async () => {
     setLoading(true)
-    const oldV=editEmp.vested_sparks||0, oldU=editEmp.unvested_sparks||0
-    const newV=parseInt(editValues.vested_sparks)||0, newU=parseInt(editValues.unvested_sparks)||0
+    const oldV = editEmp.vested_sparks || 0, oldU = editEmp.unvested_sparks || 0
+    const newV = parseInt(editValues.vested_sparks) || 0, newU = parseInt(editValues.unvested_sparks) || 0
     await supabase.from('employees').update({
-      first_name:editValues.first_name, last_name:editValues.last_name,
-      email:editValues.email.toLowerCase(), phone:editValues.phone, carrier:editValues.carrier||'',
-      vested_sparks:newV, unvested_sparks:newU,
-      daily_accrual:parseInt(editValues.daily_accrual)||0,
-      job_grade:editValues.job_grade, job_title:editValues.job_title,
-      is_management:editValues.is_management||MANAGEMENT_GRADES.includes(editValues.job_grade),
-      has_spark_list:editValues.has_spark_list,
-      notify_email:editValues.notify_email, notify_sms:editValues.notify_sms,
-      updated_at:new Date().toISOString()
+      first_name: editValues.first_name, last_name: editValues.last_name,
+      email: editValues.email.toLowerCase(), phone: editValues.phone, carrier: editValues.carrier || '',
+      vested_sparks: newV, unvested_sparks: newU,
+      daily_accrual: parseInt(editValues.daily_accrual) || 0,
+      job_grade: editValues.job_grade, job_title: editValues.job_title,
+      is_management: editValues.is_management || MANAGEMENT_GRADES.includes(editValues.job_grade),
+      has_spark_list: editValues.has_spark_list,
+      notify_email: editValues.notify_email, notify_sms: editValues.notify_sms,
+      updated_at: new Date().toISOString()
     }).eq('id', editEmp.id)
-    const vd=newV-oldV, ud=newU-oldU
-    if (vd!==0||ud!==0) {
+    const vd = newV - oldV, ud = newU - oldU
+    if (vd !== 0 || ud !== 0) {
       await supabase.from('spark_transactions').insert({
-        from_employee_id:currentUser.id, to_employee_id:editEmp.id,
-        amount:vd+ud, transaction_type:'admin_adjust',
-        note:`Admin: vested ${vd>=0?'+':''}${vd}, unvested ${ud>=0?'+':''}${ud}`, vested:newV>0
+        from_employee_id: currentUser.id, to_employee_id: editEmp.id,
+        amount: vd + ud, transaction_type: 'admin_adjust',
+        note: `Admin: vested ${vd >= 0 ? '+' : ''}${vd}, unvested ${ud >= 0 ? '+' : ''}${ud}`, vested: newV > 0
       })
     }
-    setLoading(false); setEditEmp(null); showMsg('success','Employee updated!'); fetchAll()
+    setLoading(false); setEditEmp(null); showMsg('success', 'Employee updated!'); fetchAll()
   }
 
-  // Cashout
   const processCashout = async () => {
     const n = parseInt(cashoutSparks)
-    if (!n||n<1) { showMsg('error','Enter valid spark amount'); return }
-    const total=(cashoutEmp.vested_sparks||0)+(cashoutEmp.unvested_sparks||0)
-    if (n>total) { showMsg('error',`Only ${total} sparks available`); return }
+    if (!n || n < 1) { showMsg('error', 'Enter valid spark amount'); return }
+    const total = (cashoutEmp.vested_sparks || 0) + (cashoutEmp.unvested_sparks || 0)
+    if (n > total) { showMsg('error', `Only ${total} sparks available`); return }
     setLoading(true)
-    const fromV=Math.min(n,cashoutEmp.vested_sparks||0), fromU=n-fromV
+    const fromV = Math.min(n, cashoutEmp.vested_sparks || 0), fromU = n - fromV
     await supabase.from('employees').update({
-      vested_sparks:(cashoutEmp.vested_sparks||0)-fromV,
-      unvested_sparks:Math.max(0,(cashoutEmp.unvested_sparks||0)-fromU),
-      redeemed_sparks:(cashoutEmp.redeemed_sparks||0)+n,
-      updated_at:new Date().toISOString()
+      vested_sparks: (cashoutEmp.vested_sparks || 0) - fromV,
+      unvested_sparks: Math.max(0, (cashoutEmp.unvested_sparks || 0) - fromU),
+      redeemed_sparks: (cashoutEmp.redeemed_sparks || 0) + n,
+      updated_at: new Date().toISOString()
     }).eq('id', cashoutEmp.id)
     await supabase.from('spark_transactions').insert({
-      from_employee_id:cashoutEmp.id, to_employee_id:cashoutEmp.id,
-      amount:-n, transaction_type:'cashout', note:cashoutNote||null, reason:cashoutValue||null, vested:true
+      from_employee_id: cashoutEmp.id, to_employee_id: cashoutEmp.id,
+      amount: -n, transaction_type: 'cashout', note: cashoutNote || null, reason: cashoutValue || null, vested: true
     })
     await supabase.from('spark_cashouts').insert({
-      employee_id:cashoutEmp.id, admin_id:currentUser.id,
-      sparks_redeemed:n, redemption_value:cashoutValue||null, note:cashoutNote||null
+      employee_id: cashoutEmp.id, admin_id: currentUser.id,
+      sparks_redeemed: n, redemption_value: cashoutValue || null, note: cashoutNote || null
     })
     setLoading(false); setCashoutEmp(null)
-    showMsg('success',`✅ Cashed out ${n} sparks for ${cashoutEmp.first_name} ${cashoutEmp.last_name}`)
+    showMsg('success', `✅ Cashed out ${n} sparks for ${cashoutEmp.first_name} ${cashoutEmp.last_name}`)
     fetchAll()
   }
 
-  // Test notification
   const handleTestNotif = async () => {
-    const emp = employees.find(e=>e.id===testEmpId)
-    if (!emp) { showMsg('error','Select an employee'); return }
+    const emp = employees.find(e => e.id === testEmpId)
+    if (!emp) { showMsg('error', 'Select an employee'); return }
     setTestLoading(true)
     await sendTestNotification(emp, testChannel)
     setTestLoading(false)
-    showMsg('success',`Test ${testChannel} sent to ${emp.first_name} ${emp.last_name}`)
+    showMsg('success', `Test ${testChannel} sent to ${emp.first_name} ${emp.last_name}`)
   }
 
-  // Reports
   const runReport = async () => {
     setReportLoading(true)
     let q = supabase.from('spark_transactions')
       .select('*, from_emp:from_employee_id(first_name,last_name), to_emp:to_employee_id(first_name,last_name)')
-      .gte('created_at', reportFrom+'T00:00:00').lte('created_at', reportTo+'T23:59:59')
-      .order('created_at',{ascending:false})
-    if (reportTypeFilter!=='all') q = q.eq('transaction_type',reportTypeFilter)
+      .gte('created_at', reportFrom + 'T00:00:00').lte('created_at', reportTo + 'T23:59:59')
+      .order('created_at', { ascending: false })
+    if (reportTypeFilter !== 'all') q = q.eq('transaction_type', reportTypeFilter)
     const { data: txns } = await q
     const { data: cashouts } = await supabase.from('spark_cashouts')
       .select('*, employee:employee_id(first_name,last_name), admin:admin_id(first_name,last_name)')
-      .gte('cashed_out_at', reportFrom+'T00:00:00').lte('cashed_out_at', reportTo+'T23:59:59')
-      .order('cashed_out_at',{ascending:false})
-    const assignTxns=(txns||[]).filter(t=>t.transaction_type==='assign')
-    const totalAssigned=assignTxns.reduce((s,t)=>s+t.amount,0)
-    const totalCashedOut=(cashouts||[]).reduce((s,c)=>s+c.sparks_redeemed,0)
-    const { data: allEmps } = await supabase.from('employees').select('vested_sparks,unvested_sparks').eq('is_admin',false)
-    const totalInSystem=(allEmps||[]).reduce((s,e)=>s+(e.vested_sparks||0)+(e.unvested_sparks||0),0)
-    setReportData({txns:txns||[],cashouts:cashouts||[],totalAssigned,totalCashedOut,totalInSystem})
+      .gte('cashed_out_at', reportFrom + 'T00:00:00').lte('cashed_out_at', reportTo + 'T23:59:59')
+      .order('cashed_out_at', { ascending: false })
+    const assignTxns = (txns || []).filter(t => t.transaction_type === 'assign')
+    const totalAssigned = assignTxns.reduce((s, t) => s + t.amount, 0)
+    const totalCashedOut = (cashouts || []).reduce((s, c) => s + c.sparks_redeemed, 0)
+    const { data: allEmps } = await supabase.from('employees').select('vested_sparks,unvested_sparks').eq('is_admin', false)
+    const totalInSystem = (allEmps || []).reduce((s, e) => s + (e.vested_sparks || 0) + (e.unvested_sparks || 0), 0)
+    setReportData({ txns: txns || [], cashouts: cashouts || [], totalAssigned, totalCashedOut, totalInSystem })
     setReportLoading(false)
   }
 
@@ -358,9 +508,9 @@ export default function AdminPage() {
     setReportLoading(true)
     const { data: emps } = await supabase.from('employees')
       .select('id,first_name,last_name,job_title,job_grade,daily_sparks_remaining,daily_accrual,is_management')
-      .eq('is_admin',false).eq('is_management',false)
-    const withUnused=(emps||[]).filter(e=>(e.daily_sparks_remaining||0)>0)
-    setUnusedData({employees:withUnused, totalUnused:withUnused.reduce((s,e)=>s+(e.daily_sparks_remaining||0),0), reportDate:new Date().toLocaleDateString()})
+      .eq('is_admin', false).eq('is_management', false)
+    const withUnused = (emps || []).filter(e => (e.daily_sparks_remaining || 0) > 0)
+    setUnusedData({ employees: withUnused, totalUnused: withUnused.reduce((s, e) => s + (e.daily_sparks_remaining || 0), 0), reportDate: new Date().toLocaleDateString() })
     setReportLoading(false)
   }
 
@@ -369,40 +519,34 @@ export default function AdminPage() {
     let csv = ''
     if (unusedData) {
       csv = 'Employee,Job Title,Job Grade,Unused Sparks,Daily Accrual\n'
-      unusedData.employees.forEach(e => { csv += `"${e.first_name} ${e.last_name}","${e.job_title||''}","${e.job_grade||''}",${e.daily_sparks_remaining||0},${e.daily_accrual||0}\n` })
+      unusedData.employees.forEach(e => { csv += `"${e.first_name} ${e.last_name}","${e.job_title || ''}","${e.job_grade || ''}",${e.daily_sparks_remaining || 0},${e.daily_accrual || 0}\n` })
       csv += `\nTotal Unused,${unusedData.totalUnused}\n`
     } else {
       csv = 'Date,From,To,Amount,Type,Reason/Note,Status\n'
       reportData.txns.forEach(t => {
-        const from=t.from_emp?`${t.from_emp.first_name} ${t.from_emp.last_name}`:''
-        const to=t.to_emp?`${t.to_emp.first_name} ${t.to_emp.last_name}`:''
-        csv += `"${new Date(t.created_at).toLocaleDateString()}","${from}","${to}",${t.amount},"${t.transaction_type}","${t.reason||t.note||''}","${t.vested?'Vested':'Pending'}"\n`
+        const from = t.from_emp ? `${t.from_emp.first_name} ${t.from_emp.last_name}` : ''
+        const to = t.to_emp ? `${t.to_emp.first_name} ${t.to_emp.last_name}` : ''
+        csv += `"${new Date(t.created_at).toLocaleDateString()}","${from}","${to}",${t.amount},"${t.transaction_type}","${t.reason || t.note || ''}","${t.vested ? 'Vested' : 'Pending'}"\n`
       })
     }
-    const blob = new Blob([csv],{type:'text/csv'})
+    const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href=url; a.download=`dde-sparks-${reportFrom}.csv`; a.click()
+    const a = document.createElement('a'); a.href = url; a.download = `dde-sparks-${reportFrom}.csv`; a.click()
     URL.revokeObjectURL(url)
   }
 
   const exportPDF = () => {
-    const win = window.open('','_blank')
-    const content = reportRef.current?.innerHTML||'<p>No report data</p>'
+    const win = window.open('', '_blank')
+    const content = reportRef.current?.innerHTML || '<p>No report data</p>'
     win.document.write(`<!DOCTYPE html><html><head><title>DDE Spark Report</title>
-<style>body{font-family:Arial,sans-serif;color:#222;padding:20px;font-size:12px;}
-h1{color:#26643F;font-size:18px;}h2{color:#26643F;font-size:14px;margin-top:20px;}
-table{width:100%;border-collapse:collapse;margin-top:10px;}
-th{background:#26643F;color:#fff;padding:6px 8px;text-align:left;font-size:11px;}
-td{padding:5px 8px;border-bottom:1px solid #ddd;font-size:11px;}
-@media print{body{padding:0;}}
-</style></head><body>
-<h1>DDE Spark Portal — Report</h1><p style="color:#666">Generated: ${new Date().toLocaleString()}</p>
-${content}<script>window.onload=()=>window.print()</script></body></html>`)
+<style>body{font-family:Arial,sans-serif;color:#222;padding:20px;font-size:12px;}h1{color:#26643F;font-size:18px;}h2{color:#26643F;font-size:14px;margin-top:20px;}table{width:100%;border-collapse:collapse;margin-top:10px;}th{background:#26643F;color:#fff;padding:6px 8px;text-align:left;font-size:11px;}td{padding:5px 8px;border-bottom:1px solid #ddd;font-size:11px;}@media print{body{padding:0;}}</style>
+</head><body><h1>DDE Spark Portal — Report</h1><p style="color:#666">Generated: ${new Date().toLocaleString()}</p>${content}<script>window.onload=()=>window.print()</script></body></html>`)
     win.document.close()
   }
 
-  const freqLabel = getFrequencyLabel(settings.spark_frequency||'daily')
+  const freqLabel = getFrequencyLabel(settings.spark_frequency || 'daily')
 
+  // ── RENDER ─────────────────────────────────────────────────────────────────
   return (
     <div className="fade-in">
       <h1 className="page-title">⚙️ Admin Dashboard</h1>
@@ -416,12 +560,12 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
       )}
 
       <div className="tabs">
-        {[['employees','👥 Employees'],['add','➕ Add'],['batch','📋 Batch'],['settings','⚙️ Settings'],['reports','📊 Reports']].map(([t,label])=>(
-          <button key={t} className={`tab-btn${tab===t?' active':''}`} onClick={()=>setTab(t)}>{label}</button>
+        {[['employees','👥 Employees'],['add','➕ Add'],['batch','📋 Batch'],['settings','⚙️ Settings'],['lists','📝 Lists'],['reports','📊 Reports']].map(([t,label]) => (
+          <button key={t} className={`tab-btn${tab===t?' active':''}`} onClick={() => setTab(t)}>{label}</button>
         ))}
       </div>
 
-      {/* EMPLOYEES TAB */}
+      {/* ── EMPLOYEES TAB ── */}
       {tab==='employees'&&(
         <div className="card">
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px',flexWrap:'wrap',gap:'12px'}}>
@@ -432,30 +576,21 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
               <button className={`sort-btn${sortMode==='ranking'?' active':''}`} onClick={()=>setSortMode('ranking')}>🏆 Ranking</button>
             </div>
           </div>
-          {/* Dual scrollbar: top mirror + bottom native */}
           <DualScrollTable>
             <table style={{minWidth:'1300px'}}>
               <thead>
                 <tr>
-                  {/* Identity + spark numbers + actions — immediately visible */}
                   <th style={{position:'sticky',left:0,background:'var(--bg-darker)',zIndex:2}}>Name</th>
-                  <th>Grade</th>
-                  <th>Title</th>
+                  <th>Grade</th><th>Title</th>
                   <th>Vested</th><th>Unvested</th><th>Redeemed</th><th>Total</th>
-                  <th>Left/{freqLabel}</th>
-                  <th>Notify</th>
-                  <th>Flags</th>
-                  <th>Actions</th>
-                  {/* Contact details — scrolled into view */}
-                  <th>Email</th>
-                  <th>Phone</th>
-                  <th>Carrier / SMS Address</th>
+                  <th>Left/{freqLabel}</th><th>Notify</th><th>Flags</th><th>Actions</th>
+                  <th>Email</th><th>Phone</th><th>Carrier / SMS Address</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedEmployees.map(emp => {
-                  const total=(emp.vested_sparks||0)+(emp.unvested_sparks||0)+(emp.redeemed_sparks||0)
-                  const carrierLabel = CARRIERS.find(c=>c.value===emp.carrier)?.label||'—'
+                  const total = (emp.vested_sparks||0)+(emp.unvested_sparks||0)+(emp.redeemed_sparks||0)
+                  const carrierLabel = CARRIERS.find(c => c.value === emp.carrier)?.label || '—'
                   const smsAddr = emp.phone && emp.carrier ? emp.phone.replace(/\D/g,'').slice(-10)+emp.carrier : null
                   return (
                     <tr key={emp.id}>
@@ -486,7 +621,6 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
                           <button className="btn btn-danger btn-xs" onClick={()=>removeEmployee(emp)}>✕</button>
                         </div>
                       </td>
-                      {/* Contact details — at end */}
                       <td style={{fontSize:'0.72rem',maxWidth:'180px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{emp.email}</td>
                       <td style={{fontSize:'0.72rem',whiteSpace:'nowrap'}}>{emp.phone||'—'}</td>
                       <td style={{fontSize:'0.7rem'}}>
@@ -502,7 +636,7 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
         </div>
       )}
 
-      {/* ADD EMPLOYEE */}
+      {/* ── ADD EMPLOYEE ── */}
       {tab==='add'&&(
         <div className="card">
           <div className="card-title"><span className="icon">➕</span> Add New Employee</div>
@@ -521,13 +655,13 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
               <div className="form-group">
                 <label className="form-label">Job Grade</label>
                 <select className="form-select" value={form.job_grade} onChange={e=>setForm(f=>({...f,job_grade:e.target.value,is_management:MANAGEMENT_GRADES.includes(e.target.value)}))}>
-                  {JOB_GRADES.map(g=><option key={g} value={g}>{g||'— Select —'}</option>)}
+                  {grades.map(g=><option key={g} value={g}>{g||'— Select —'}</option>)}
                 </select>
               </div>
               <div className="form-group">
                 <label className="form-label">Job Title</label>
                 <select className="form-select" value={form.job_title} onChange={e=>setForm(f=>({...f,job_title:e.target.value}))}>
-                  {JOB_TITLES.map(t=><option key={t} value={t}>{t||'— Select —'}</option>)}
+                  {titles.map(t=><option key={t} value={t}>{t||'— Select —'}</option>)}
                 </select>
               </div>
               <div className="form-group"><label className="form-label">Initial Sparks</label><input className="form-input" type="number" min="0" value={form.initial_sparks} onChange={e=>setForm(f=>({...f,initial_sparks:e.target.value}))} /></div>
@@ -545,7 +679,7 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
         </div>
       )}
 
-      {/* BATCH IMPORT */}
+      {/* ── BATCH IMPORT ── */}
       {tab==='batch'&&(
         <div className="card">
           <div className="card-title"><span className="icon">📋</span> Batch Import / Update</div>
@@ -565,7 +699,7 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
                 ['HasSparkList','true or false'],['NotifyEmail','true or false, default true'],
                 ['NotifySMS','true or false, default false'],
                 ['Carrier','Gateway suffix: @tmomail.net, @vtext.com, etc.'],
-              ].map(([field,desc])=>(
+              ].map(([field,desc]) => (
                 <div key={field} style={{fontSize:'0.7rem'}}>
                   <span style={{color:'var(--gold-light)',fontWeight:600}}>{field}</span>
                   <span style={{color:'var(--white-dim)'}}> — {desc}</span>
@@ -577,7 +711,14 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
           <div style={{background:'rgba(224,85,85,0.12)',border:'1px solid rgba(224,85,85,0.3)',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'0.82rem'}}>
             <strong style={{color:'var(--red)'}}>⚠️ Upsert behavior:</strong>
             <span style={{color:'var(--white-dim)',marginLeft:'4px'}}>
-              <strong>Email is the unique key.</strong> If a row's email matches an existing employee, their details will be <strong>replaced</strong> with the new values from that row (name, phone, accrual, job info, flags, carrier, etc.). Spark balances are only updated if InitialSparks &gt; 0. Rows with a new email will create a new employee with default password <code style={{color:'var(--gold)'}}>spark123</code>.
+              <strong>Email is the unique key.</strong> If a row's email matches an existing employee, their details will be <strong>replaced</strong> with the new values (name, phone, accrual, job info, flags, carrier). Spark balances only update if InitialSparks &gt; 0. New emails create a new employee with default password <code style={{color:'var(--gold)'}}>spark123</code>.
+            </span>
+          </div>
+
+          <div style={{background:'rgba(240,192,64,0.08)',border:'1px solid rgba(240,192,64,0.2)',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'0.82rem'}}>
+            <strong style={{color:'var(--gold)'}}>ℹ️ Unknown values:</strong>
+            <span style={{color:'var(--white-dim)',marginLeft:'4px'}}>
+              If your file includes a Job Grade or Job Title not in the current lists, you'll be prompted before import runs. You can approve adding it to the list, or skip it (the value will still be saved on the employee record).
             </span>
           </div>
 
@@ -587,14 +728,105 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
               placeholder={`John,Smith,5551234567,john@dde.com,0,2,J1,Journeyman,false,false,true,false,@tmomail.net\nJane,Doe,5559876543,jane@dde.com,0,5,P1,Project Manager,true,true,true,true,@vtext.com`}
               style={{fontFamily:'monospace',fontSize:'0.8rem'}} />
           </div>
-          <button className="btn btn-gold" onClick={addBatch} disabled={loading||!batchText.trim()}>{loading?'Importing...':'📋 Import / Update'}</button>
+          <button className="btn btn-gold" onClick={handleBatchClick} disabled={batchRunning||!batchText.trim()}>
+            {batchRunning ? 'Importing...' : '📋 Import / Update'}
+          </button>
+
+          {/* Failed rows panel */}
+          {batchErrors.length > 0 && (
+            <div style={{marginTop:'16px',background:'rgba(224,85,85,0.10)',border:'1px solid rgba(224,85,85,0.4)',borderRadius:'10px',padding:'14px 16px'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'10px'}}>
+                <strong style={{color:'var(--red)',fontSize:'0.88rem'}}>❌ {batchErrors.length} row{batchErrors.length!==1?'s':''} failed to import</strong>
+                <button onClick={()=>setBatchErrors([])} style={{background:'none',border:'none',cursor:'pointer',color:'var(--white-dim)',fontSize:'1rem',lineHeight:1,padding:'2px 6px'}} title="Dismiss">×</button>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+                {batchErrors.map((err,i) => (
+                  <div key={i} style={{background:'rgba(0,0,0,0.25)',borderRadius:'6px',padding:'8px 12px'}}>
+                    <div style={{fontWeight:700,color:'var(--white-soft)',fontSize:'0.86rem'}}>{err.name}</div>
+                    <div style={{fontSize:'0.75rem',color:'var(--white-dim)',marginTop:'1px'}}>{err.email}</div>
+                    <div style={{fontSize:'0.76rem',color:'#ff8a8a',marginTop:'4px'}}>⚠ {err.reason}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* SETTINGS */}
+      {/* ── LISTS TAB ── */}
+      {tab==='lists'&&(
+        <div>
+          {/* JOB GRADES */}
+          <div className="card" style={{marginBottom:'16px'}}>
+            <div className="card-title"><span className="icon">📝</span> Job Grades</div>
+            <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'16px'}}>
+              These are the grades available in employee dropdowns. Sorted by rank progression. Adding a grade like "A5" will automatically insert it after A4.
+            </p>
+            <div style={{display:'flex',flexWrap:'wrap',gap:'8px',marginBottom:'20px'}}>
+              {gradeItems.map((item, i) => (
+                <div key={item.id} style={{display:'flex',alignItems:'center',gap:'4px',background:'rgba(240,192,64,0.1)',border:'1px solid rgba(240,192,64,0.3)',borderRadius:'20px',padding:'4px 10px 4px 12px'}}>
+                  <span style={{fontSize:'0.82rem',fontWeight:600,color:'var(--gold)'}}>{item.value}</span>
+                  <button onClick={()=>{if(window.confirm(`Remove grade "${item.value}"? This won't affect existing employees.`)) removeListItem(item.id)}}
+                    style={{background:'none',border:'none',cursor:'pointer',color:'var(--white-dim)',fontSize:'0.85rem',padding:'0 2px',lineHeight:1,marginLeft:'2px'}}
+                    title="Remove grade"
+                    onMouseEnter={e=>e.target.style.color='var(--red)'}
+                    onMouseLeave={e=>e.target.style.color='var(--white-dim)'}>
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:'10px',alignItems:'flex-end'}}>
+              <div className="form-group" style={{marginBottom:0,flex:1,maxWidth:'280px'}}>
+                <label className="form-label">Add New Grade</label>
+                <input className="form-input" value={newGrade} onChange={e=>setNewGrade(e.target.value)}
+                  onKeyDown={e=>e.key==='Enter'&&handleAddGrade()}
+                  placeholder="e.g. A5, J5, F5..." />
+              </div>
+              <button className="btn btn-gold btn-sm" onClick={handleAddGrade} disabled={listSaving||!newGrade.trim()}>
+                {listSaving ? '...' : '+ Add Grade'}
+              </button>
+            </div>
+          </div>
+
+          {/* JOB TITLES */}
+          <div className="card">
+            <div className="card-title"><span className="icon">📝</span> Job Titles</div>
+            <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'16px'}}>
+              These are the job titles available in employee dropdowns.
+            </p>
+            <div style={{display:'flex',flexWrap:'wrap',gap:'8px',marginBottom:'20px'}}>
+              {titleItems.map(item => (
+                <div key={item.id} style={{display:'flex',alignItems:'center',gap:'4px',background:'rgba(94,232,138,0.1)',border:'1px solid rgba(94,232,138,0.25)',borderRadius:'20px',padding:'4px 10px 4px 12px'}}>
+                  <span style={{fontSize:'0.82rem',fontWeight:600,color:'var(--green-bright)'}}>{item.value}</span>
+                  <button onClick={()=>{if(window.confirm(`Remove title "${item.value}"? This won't affect existing employees.`)) removeListItem(item.id)}}
+                    style={{background:'none',border:'none',cursor:'pointer',color:'var(--white-dim)',fontSize:'0.85rem',padding:'0 2px',lineHeight:1,marginLeft:'2px'}}
+                    title="Remove title"
+                    onMouseEnter={e=>e.target.style.color='var(--red)'}
+                    onMouseLeave={e=>e.target.style.color='var(--white-dim)'}>
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:'10px',alignItems:'flex-end'}}>
+              <div className="form-group" style={{marginBottom:0,flex:1,maxWidth:'280px'}}>
+                <label className="form-label">Add New Title</label>
+                <input className="form-input" value={newTitle} onChange={e=>setNewTitle(e.target.value)}
+                  onKeyDown={e=>e.key==='Enter'&&handleAddTitle()}
+                  placeholder="e.g. Senior Foreman..." />
+              </div>
+              <button className="btn btn-gold btn-sm" onClick={handleAddTitle} disabled={listSaving||!newTitle.trim()}>
+                {listSaving ? '...' : '+ Add Title'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── SETTINGS ── */}
       {tab==='settings'&&(
         <div>
-          {/* Reminder time warnings */}
           {reminderWarning && (
             <div className="alert alert-warning" style={{marginBottom:'16px'}}>
               <strong>⚠️ Reminder Timing Warning</strong>
@@ -635,6 +867,7 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
                 </div>
               )}
             </div>
+            <button className="btn btn-gold btn-sm" onClick={saveSettings} disabled={loading}>{loading?'Saving...':'💾 Save Settings'}</button>
           </div>
 
           <div className="card" style={{marginBottom:'16px'}}>
@@ -689,7 +922,7 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
           <div className="card" style={{marginBottom:'16px'}}>
             <div className="card-title"><span className="icon">⏰</span> Reminder Settings</div>
             <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'14px'}}>
-              Up to 3 reminders sent before spark allowance expires (after go-live date). Note: daily frequency reminders under 24h are ignored.
+              Up to 3 reminders before spark allowance expires (after go-live). Daily frequency: reminders under 24h are ignored.
             </p>
             <div style={{display:'flex',gap:'12px',flexWrap:'wrap',marginBottom:'12px'}}>
               {reminderOffsets.map((val,i) => (
@@ -711,7 +944,7 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
 
           <div className="card">
             <div className="card-title"><span className="icon">🧪</span> Test Notifications</div>
-            <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'14px'}}>Send a test email or SMS to any employee. Works even before go-live date.</p>
+            <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'14px'}}>Send a test email or SMS to any employee. Works even before go-live.</p>
             <div className="form-grid">
               <div className="form-group">
                 <label className="form-label">Employee</label>
@@ -730,13 +963,13 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
               </div>
             </div>
             <button className="btn btn-gold btn-sm" onClick={handleTestNotif} disabled={testLoading||!testEmpId}>
-              {testLoading?'Sending...':'🧪 Send Test'}
+              {testLoading ? 'Sending...' : '🧪 Send Test'}
             </button>
           </div>
         </div>
       )}
 
-      {/* REPORTS */}
+      {/* ── REPORTS ── */}
       {tab==='reports'&&(
         <div>
           <div className="card" style={{marginBottom:'16px'}}>
@@ -770,21 +1003,19 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
                 <p style={{fontSize:'0.82rem',color:'var(--white-dim)',marginBottom:'12px'}}>Non-management employees with unused giving allowance.</p>
                 <div className="stat-grid" style={{marginBottom:'16px'}}>
                   <div className="stat-card"><div className="stat-value" style={{color:'var(--red)'}}>{unusedData.totalUnused}</div><div className="stat-label">Total Unused</div></div>
-                  <div className="stat-card"><div className="stat-value">{unusedData.employees.length}</div><div className="stat-label">Employees w/ Unused</div></div>
+                  <div className="stat-card"><div className="stat-value">{unusedData.employees.length}</div><div className="stat-label">w/ Unused</div></div>
                 </div>
                 {unusedData.employees.length>0?(
-                  <div className="table-wrap">
-                    <table><thead><tr><th>Employee</th><th>Title</th><th>Grade</th><th>Unused</th><th>Accrual</th></tr></thead>
-                      <tbody>{unusedData.employees.map(e=>(
-                        <tr key={e.id}><td style={{fontWeight:600}}>{e.first_name} {e.last_name}</td><td style={{fontSize:'0.82rem'}}>{e.job_title||'—'}</td>
-                          <td><span style={{fontSize:'0.72rem',padding:'2px 5px',background:'rgba(240,192,64,0.1)',borderRadius:'4px',color:'var(--gold)'}}>{e.job_grade||'—'}</span></td>
-                          <td><span style={{color:'var(--red)',fontWeight:700}}>🔥 {e.daily_sparks_remaining||0}</span></td>
-                          <td style={{color:'var(--white-dim)'}}>{e.daily_accrual||0}</td>
-                        </tr>
-                      ))}</tbody>
-                    </table>
-                  </div>
-                ):<div className="empty-state"><p>All employees have used their sparks! 🎉</p></div>}
+                  <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Title</th><th>Grade</th><th>Unused</th><th>Accrual</th></tr></thead>
+                    <tbody>{unusedData.employees.map(e=>(
+                      <tr key={e.id}><td style={{fontWeight:600}}>{e.first_name} {e.last_name}</td><td style={{fontSize:'0.82rem'}}>{e.job_title||'—'}</td>
+                        <td><span style={{fontSize:'0.72rem',padding:'2px 5px',background:'rgba(240,192,64,0.1)',borderRadius:'4px',color:'var(--gold)'}}>{e.job_grade||'—'}</span></td>
+                        <td><span style={{color:'var(--red)',fontWeight:700}}>🔥 {e.daily_sparks_remaining||0}</span></td>
+                        <td style={{color:'var(--white-dim)'}}>{e.daily_accrual||0}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table></div>
+                ):<div className="empty-state"><p>All sparks used! 🎉</p></div>}
               </div>
             )}
             {reportData&&(
@@ -835,7 +1066,7 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
         </div>
       )}
 
-      {/* EDIT MODAL */}
+      {/* ── EDIT EMPLOYEE MODAL ── */}
       {editEmp&&(
         <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setEditEmp(null)}>
           <div className="modal" style={{maxWidth:'600px'}}>
@@ -854,13 +1085,13 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
               <div className="form-group">
                 <label className="form-label">Job Grade</label>
                 <select className="form-select" value={editValues.job_grade||''} onChange={e=>setEditValues(v=>({...v,job_grade:e.target.value,is_management:MANAGEMENT_GRADES.includes(e.target.value)}))}>
-                  {JOB_GRADES.map(g=><option key={g} value={g}>{g||'— Select —'}</option>)}
+                  {grades.map(g=><option key={g} value={g}>{g||'— Select —'}</option>)}
                 </select>
               </div>
               <div className="form-group">
                 <label className="form-label">Job Title</label>
                 <select className="form-select" value={editValues.job_title||''} onChange={e=>setEditValues(v=>({...v,job_title:e.target.value}))}>
-                  {JOB_TITLES.map(t=><option key={t} value={t}>{t||'— Select —'}</option>)}
+                  {titles.map(t=><option key={t} value={t}>{t||'— Select —'}</option>)}
                 </select>
               </div>
               <div className="form-group"><label className="form-label">Vested ✨</label><input className="form-input" type="number" min="0" value={editValues.vested_sparks||0} onChange={e=>setEditValues(v=>({...v,vested_sparks:e.target.value}))} /></div>
@@ -881,7 +1112,7 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
         </div>
       )}
 
-      {/* CASHOUT MODAL */}
+      {/* ── CASHOUT MODAL ── */}
       {cashoutEmp&&(
         <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setCashoutEmp(null)}>
           <div className="modal">
@@ -900,6 +1131,47 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
               <button className="btn btn-sm" style={{background:'var(--green-bright)',color:'#000',fontFamily:'var(--font-display)',fontSize:'0.72rem',letterSpacing:'0.1em'}} onClick={processCashout} disabled={loading||!cashoutSparks}>{loading?'Processing...':'💰 Process Cash Out'}</button>
               <button className="btn btn-outline" onClick={()=>setCashoutEmp(null)}>Cancel</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── UNKNOWN VALUE PROMPT MODAL ── */}
+      {unknownQueue.length > 0 && (
+        <div className="modal-overlay">
+          <div className="modal" style={{maxWidth:'480px'}}>
+            <div className="modal-title">⚠️ Unrecognized Value in Import</div>
+            <div style={{background:'rgba(240,192,64,0.08)',border:'1px solid rgba(240,192,64,0.25)',borderRadius:'8px',padding:'16px',marginBottom:'16px'}}>
+              <p style={{fontSize:'0.92rem',marginBottom:'8px',lineHeight:1.6}}>
+                Your file includes{' '}
+                <strong style={{color:'var(--gold)'}}>"{unknownQueue[0].value}"</strong>{' '}
+                as a{' '}
+                <strong style={{color:'var(--gold)'}}>{unknownQueue[0].listType === 'job_grade' ? 'Job Grade' : 'Job Title'}</strong>
+                {unknownQueue[0].rowCount > 1 && <span style={{color:'var(--white-dim)'}}> ({unknownQueue[0].rowCount} rows)</span>}
+                {', but that\'s not in the current list.'}
+              </p>
+              <p style={{fontSize:'0.85rem',color:'var(--white-dim)',margin:0}}>
+                Would you like to add <strong style={{color:'var(--white-soft)'}}>"{unknownQueue[0].value}"</strong> to the {unknownQueue[0].listType === 'job_grade' ? 'Job Grades' : 'Job Titles'} list?
+                {unknownQueue[0].listType === 'job_grade' && ' It will be inserted in the most logical position.'}
+              </p>
+            </div>
+            {unknownQueue.length > 1 && (
+              <p style={{fontSize:'0.75rem',color:'var(--white-dim)',marginBottom:'14px'}}>
+                {unknownQueue.length - 1} more unknown value{unknownQueue.length - 1 !== 1 ? 's' : ''} to review after this.
+              </p>
+            )}
+            {listSaving
+              ? <div style={{textAlign:'center',padding:'16px'}}><div className="spark-loader" style={{margin:'0 auto'}}></div><p style={{marginTop:'10px',fontSize:'0.82rem',color:'var(--white-dim)'}}>Adding to list...</p></div>
+              : (
+                <div style={{display:'flex',gap:'12px',flexWrap:'wrap'}}>
+                  <button className="btn btn-gold" onClick={() => handleUnknownResponse(true)}>
+                    ✅ Yes, Add to List
+                  </button>
+                  <button className="btn btn-outline" onClick={() => handleUnknownResponse(false)}>
+                    Skip — Import Anyway
+                  </button>
+                </div>
+              )
+            }
           </div>
         </div>
       )}
