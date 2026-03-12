@@ -18,6 +18,10 @@ export default function MessageBoardPage() {
   const [pushSms, setPushSms] = useState(false)
   const [postLoading, setPostLoading] = useState(false)
   const [postMsg, setPostMsg] = useState(null)
+  const [editingPost, setEditingPost] = useState(null)   // post object being edited
+  const [editPostTitle, setEditPostTitle] = useState('')
+  const [editPostBody, setEditPostBody] = useState('')
+  const [editPostLoading, setEditPostLoading] = useState(false)
 
   // Documents
   const [docs, setDocs] = useState([])
@@ -96,6 +100,26 @@ export default function MessageBoardPage() {
   const deletePost = async (id) => {
     if (!window.confirm('Delete this post?')) return
     await supabase.from('message_board').delete().eq('id', id)
+    fetchPosts()
+  }
+
+  const openEditPost = (post) => {
+    setEditingPost(post)
+    setEditPostTitle(post.title || '')
+    setEditPostBody(post.body || '')
+  }
+
+  const saveEditPost = async () => {
+    if (!editPostBody.trim()) return
+    setEditPostLoading(true)
+    const { error } = await supabase.from('message_board').update({
+      title: editPostTitle.trim() || null,
+      body: editPostBody.trim(),
+    }).eq('id', editingPost.id)
+    setEditPostLoading(false)
+    if (error) { setPostMsg({ type:'error', text:error.message }); return }
+    setEditingPost(null)
+    setPostMsg({ type:'success', text:'Post updated!' })
     fetchPosts()
   }
 
@@ -229,8 +253,14 @@ export default function MessageBoardPage() {
                   </div>
                 </div>
                 {isAdmin&&(
-                  <button onClick={()=>deletePost(post.id)} style={{background:'none',border:'none',cursor:'pointer',color:'var(--white-dim)',fontSize:'1rem',padding:'2px 6px',borderRadius:'4px',transition:'all 0.15s'}}
-                    title="Delete post" onMouseEnter={e=>e.target.style.color='var(--red)'} onMouseLeave={e=>e.target.style.color='var(--white-dim)'}>✕</button>
+                  <div style={{display:'flex',gap:'4px',flexShrink:0}}>
+                    <button onClick={()=>openEditPost(post)}
+                      style={{background:'none',border:'none',cursor:'pointer',color:'var(--white-dim)',fontSize:'0.9rem',padding:'3px 7px',borderRadius:'4px',transition:'all 0.15s'}}
+                      title="Edit post" onMouseEnter={e=>e.target.style.color='var(--gold)'} onMouseLeave={e=>e.target.style.color='var(--white-dim)'}>✏️</button>
+                    <button onClick={()=>deletePost(post.id)}
+                      style={{background:'none',border:'none',cursor:'pointer',color:'var(--white-dim)',fontSize:'1rem',padding:'2px 6px',borderRadius:'4px',transition:'all 0.15s'}}
+                      title="Delete post" onMouseEnter={e=>e.target.style.color='var(--red)'} onMouseLeave={e=>e.target.style.color='var(--white-dim)'}>✕</button>
+                  </div>
                 )}
               </div>
               <div style={{fontSize:'0.9rem',lineHeight:'1.6',color:'var(--white-soft)',whiteSpace:'pre-wrap'}}>{post.body}</div>
@@ -356,6 +386,39 @@ export default function MessageBoardPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── EDIT POST MODAL ── */}
+      {editingPost && (
+        <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setEditingPost(null)}>
+          <div className="modal" style={{maxWidth:'560px'}}>
+            <div className="modal-title">✏️ Edit Post</div>
+            <div style={{fontSize:'0.75rem',color:'var(--white-dim)',marginBottom:'14px'}}>
+              Originally posted {fmtDateTime(editingPost.created_at)}
+              {(editingPost.push_email||editingPost.push_sms)&&(
+                <span style={{marginLeft:'8px',color:'var(--gold-dark)'}}>
+                  {editingPost.push_email&&'📧'}{editingPost.push_sms&&' 📱'} (notifications already sent — editing does not re-notify)
+                </span>
+              )}
+            </div>
+            <div className="form-group">
+              <label className="form-label">Title <span style={{color:'var(--white-dim)',fontWeight:400}}>(optional)</span></label>
+              <input className="form-input" value={editPostTitle} onChange={e=>setEditPostTitle(e.target.value)}
+                placeholder="Post headline..." maxLength={120} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Message *</label>
+              <textarea className="form-textarea" rows={7} value={editPostBody} onChange={e=>setEditPostBody(e.target.value)}
+                placeholder="Message body..." style={{minHeight:'120px'}} />
+            </div>
+            <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
+              <button className="btn btn-gold" onClick={saveEditPost} disabled={editPostLoading||!editPostBody.trim()}>
+                {editPostLoading?'Saving...':'💾 Save Changes'}
+              </button>
+              <button className="btn btn-outline" onClick={()=>setEditingPost(null)}>Cancel</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

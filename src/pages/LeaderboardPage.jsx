@@ -31,7 +31,13 @@ export default function LeaderboardPage() {
   const { currentUser } = useAuth()
   const [employees, setEmployees] = useState([])
   const [loading, setLoading] = useState(true)
-  const [sortMode, setSortMode] = useState('title')   // default: Title / Rank
+  const [sortMode, setSortMode] = useState(() => localStorage.getItem('dde_lb_sort') || 'title')
+
+  // Persist sort choice whenever it changes
+  const handleSortChange = (mode) => {
+    setSortMode(mode)
+    localStorage.setItem('dde_lb_sort', mode)
+  }
   const [titleFilter, setTitleFilter] = useState('')
   const [txnLog, setTxnLog] = useState([])
   const [txnLoading, setTxnLoading] = useState(true)
@@ -239,7 +245,7 @@ export default function LeaderboardPage() {
       <div style={{display:'flex',gap:'12px',alignItems:'center',marginBottom:'20px',flexWrap:'wrap'}}>
         <div className="sort-control" style={{marginBottom:0}}>
           <span className="sort-label">Sort:</span>
-          {SORT_OPTIONS.map(o => <button key={o.value} className={`sort-btn${sortMode===o.value?' active':''}`} onClick={()=>setSortMode(o.value)}>{o.label}</button>)}
+          {SORT_OPTIONS.map(o => <button key={o.value} className={`sort-btn${sortMode===o.value?' active':''}`} onClick={()=>handleSortChange(o.value)}>{o.label}</button>)}
         </div>
         {usedTitles.length > 0 && (
           <div className="sort-control" style={{marginBottom:0}}>

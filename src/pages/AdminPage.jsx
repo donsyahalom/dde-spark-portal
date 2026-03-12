@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { MANAGEMENT_GRADES, FREQUENCY_OPTIONS, CARRIERS, LEADERBOARD_RANGE_OPTIONS, getFrequencyLabel } from '../lib/constants'
+import { MANAGEMENT_GRADES, FREQUENCY_OPTIONS, CARRIERS, LEADERBOARD_RANGE_OPTIONS, REASON_CATEGORIES, getFrequencyLabel } from '../lib/constants'
 import { sendTestNotification, isBeforeGoLive } from '../lib/notificationService'
 
 // ── Hardcoded fallback lists (used only if DB is empty) ───────────────────────
@@ -194,6 +194,30 @@ export default function AdminPage() {
   const removeListItem = async (id) => {
     await supabase.from('custom_lists').delete().eq('id', id)
     fetchLists()
+  }
+
+  // ── Move a list item up or down by swapping sort_orders with its neighbour ──
+  const moveListItem = async (item, items, direction) => {
+    const idx = items.findIndex(it => it.id === item.id)
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= items.length) return
+    const neighbour = items[swapIdx]
+    setListSaving(true)
+    await Promise.all([
+      supabase.from('custom_lists').update({ sort_order: neighbour.sort_order }).eq('id', item.id),
+      supabase.from('custom_lists').update({ sort_order: item.sort_order }).eq('id', neighbour.id),
+    ])
+    setListSaving(false)
+    fetchLists()
+  }
+
+  // ── Download any list as a CSV file ──────────────────────────────────────────
+  const downloadListCsv = (filename, headers, rows) => {
+    const lines = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(','))]
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
+    URL.revokeObjectURL(url)
   }
 
   const handleAddGrade = async () => {
@@ -756,26 +780,43 @@ export default function AdminPage() {
       {/* ── LISTS TAB ── */}
       {tab==='lists'&&(
         <div>
-          {/* JOB GRADES */}
+
+          {/* ── JOB GRADES ── */}
           <div className="card" style={{marginBottom:'16px'}}>
-            <div className="card-title"><span className="icon">📝</span> Job Grades</div>
-            <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'16px'}}>
-              These are the grades available in employee dropdowns. Sorted by rank progression. Adding a grade like "A5" will automatically insert it after A4.
-            </p>
-            <div style={{display:'flex',flexWrap:'wrap',gap:'8px',marginBottom:'20px'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px',marginBottom:'6px'}}>
+              <div className="card-title" style={{marginBottom:0}}><span className="icon">📝</span> Job Grades ({gradeItems.length})</div>
+              <button className="btn btn-outline btn-sm" onClick={()=>downloadListCsv('job-grades.csv',['Order','Grade'],gradeItems.map((g,i)=>[i+1,g.value]))}>⬇️ Download CSV</button>
+            </div>
+            <p style={{color:'var(--white-dim)',fontSize:'0.8rem',marginBottom:'14px'}}>Drag the ↑↓ buttons to reorder. The order here controls dropdown order throughout the app.</p>
+
+            {/* Row list */}
+            <div style={{display:'flex',flexDirection:'column',gap:'6px',marginBottom:'18px'}}>
               {gradeItems.map((item, i) => (
-                <div key={item.id} style={{display:'flex',alignItems:'center',gap:'4px',background:'rgba(240,192,64,0.1)',border:'1px solid rgba(240,192,64,0.3)',borderRadius:'20px',padding:'4px 10px 4px 12px'}}>
-                  <span style={{fontSize:'0.82rem',fontWeight:600,color:'var(--gold)'}}>{item.value}</span>
+                <div key={item.id} style={{display:'flex',alignItems:'center',gap:'8px',background:'rgba(240,192,64,0.06)',border:'1px solid rgba(240,192,64,0.2)',borderRadius:'8px',padding:'8px 12px'}}>
+                  {/* Position badge */}
+                  <span style={{fontSize:'0.68rem',color:'var(--white-dim)',width:'22px',textAlign:'right',flexShrink:0}}>#{i+1}</span>
+                  {/* Move buttons */}
+                  <div style={{display:'flex',flexDirection:'column',gap:'1px',flexShrink:0}}>
+                    <button onClick={()=>moveListItem(item,gradeItems,'up')} disabled={i===0||listSaving}
+                      style={{background:'none',border:'none',cursor:i===0?'default':'pointer',color:i===0?'rgba(255,255,255,0.15)':'var(--white-dim)',fontSize:'0.7rem',padding:'0 3px',lineHeight:1.2}}
+                      title="Move up">▲</button>
+                    <button onClick={()=>moveListItem(item,gradeItems,'down')} disabled={i===gradeItems.length-1||listSaving}
+                      style={{background:'none',border:'none',cursor:i===gradeItems.length-1?'default':'pointer',color:i===gradeItems.length-1?'rgba(255,255,255,0.15)':'var(--white-dim)',fontSize:'0.7rem',padding:'0 3px',lineHeight:1.2}}
+                      title="Move down">▼</button>
+                  </div>
+                  {/* Value */}
+                  <span style={{flex:1,fontWeight:700,fontSize:'0.88rem',color:'var(--gold)'}}>{item.value}</span>
+                  {/* Mgmt flag */}
+                  {MANAGEMENT_GRADES.includes(item.value)&&<span className="chip chip-gold" style={{fontSize:'0.6rem',padding:'1px 6px'}}>Mgmt</span>}
+                  {/* Remove */}
                   <button onClick={()=>{if(window.confirm(`Remove grade "${item.value}"? This won't affect existing employees.`)) removeListItem(item.id)}}
-                    style={{background:'none',border:'none',cursor:'pointer',color:'var(--white-dim)',fontSize:'0.85rem',padding:'0 2px',lineHeight:1,marginLeft:'2px'}}
-                    title="Remove grade"
-                    onMouseEnter={e=>e.target.style.color='var(--red)'}
-                    onMouseLeave={e=>e.target.style.color='var(--white-dim)'}>
-                    ×
-                  </button>
+                    style={{background:'none',border:'none',cursor:'pointer',color:'var(--white-dim)',fontSize:'1rem',padding:'2px 5px',borderRadius:'4px',flexShrink:0}}
+                    title="Remove" onMouseEnter={e=>e.target.style.color='var(--red)'} onMouseLeave={e=>e.target.style.color='var(--white-dim)'}>×</button>
                 </div>
               ))}
             </div>
+
+            {/* Add new grade */}
             <div style={{display:'flex',gap:'10px',alignItems:'flex-end'}}>
               <div className="form-group" style={{marginBottom:0,flex:1,maxWidth:'280px'}}>
                 <label className="form-label">Add New Grade</label>
@@ -784,31 +825,37 @@ export default function AdminPage() {
                   placeholder="e.g. A5, J5, F5..." />
               </div>
               <button className="btn btn-gold btn-sm" onClick={handleAddGrade} disabled={listSaving||!newGrade.trim()}>
-                {listSaving ? '...' : '+ Add Grade'}
+                {listSaving?'...':'+ Add Grade'}
               </button>
             </div>
           </div>
 
-          {/* JOB TITLES */}
-          <div className="card">
-            <div className="card-title"><span className="icon">📝</span> Job Titles</div>
-            <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'16px'}}>
-              These are the job titles available in employee dropdowns.
-            </p>
-            <div style={{display:'flex',flexWrap:'wrap',gap:'8px',marginBottom:'20px'}}>
-              {titleItems.map(item => (
-                <div key={item.id} style={{display:'flex',alignItems:'center',gap:'4px',background:'rgba(94,232,138,0.1)',border:'1px solid rgba(94,232,138,0.25)',borderRadius:'20px',padding:'4px 10px 4px 12px'}}>
-                  <span style={{fontSize:'0.82rem',fontWeight:600,color:'var(--green-bright)'}}>{item.value}</span>
+          {/* ── JOB TITLES ── */}
+          <div className="card" style={{marginBottom:'16px'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px',marginBottom:'6px'}}>
+              <div className="card-title" style={{marginBottom:0}}><span className="icon">📝</span> Job Titles ({titleItems.length})</div>
+              <button className="btn btn-outline btn-sm" onClick={()=>downloadListCsv('job-titles.csv',['Order','Title'],titleItems.map((t,i)=>[i+1,t.value]))}>⬇️ Download CSV</button>
+            </div>
+            <p style={{color:'var(--white-dim)',fontSize:'0.8rem',marginBottom:'14px'}}>Order also controls leaderboard title-group sequencing (Title / Rank sort).</p>
+
+            <div style={{display:'flex',flexDirection:'column',gap:'6px',marginBottom:'18px'}}>
+              {titleItems.map((item, i) => (
+                <div key={item.id} style={{display:'flex',alignItems:'center',gap:'8px',background:'rgba(94,232,138,0.06)',border:'1px solid rgba(94,232,138,0.18)',borderRadius:'8px',padding:'8px 12px'}}>
+                  <span style={{fontSize:'0.68rem',color:'var(--white-dim)',width:'22px',textAlign:'right',flexShrink:0}}>#{i+1}</span>
+                  <div style={{display:'flex',flexDirection:'column',gap:'1px',flexShrink:0}}>
+                    <button onClick={()=>moveListItem(item,titleItems,'up')} disabled={i===0||listSaving}
+                      style={{background:'none',border:'none',cursor:i===0?'default':'pointer',color:i===0?'rgba(255,255,255,0.15)':'var(--white-dim)',fontSize:'0.7rem',padding:'0 3px',lineHeight:1.2}}>▲</button>
+                    <button onClick={()=>moveListItem(item,titleItems,'down')} disabled={i===titleItems.length-1||listSaving}
+                      style={{background:'none',border:'none',cursor:i===titleItems.length-1?'default':'pointer',color:i===titleItems.length-1?'rgba(255,255,255,0.15)':'var(--white-dim)',fontSize:'0.7rem',padding:'0 3px',lineHeight:1.2}}>▼</button>
+                  </div>
+                  <span style={{flex:1,fontWeight:700,fontSize:'0.88rem',color:'var(--green-bright)'}}>{item.value}</span>
                   <button onClick={()=>{if(window.confirm(`Remove title "${item.value}"? This won't affect existing employees.`)) removeListItem(item.id)}}
-                    style={{background:'none',border:'none',cursor:'pointer',color:'var(--white-dim)',fontSize:'0.85rem',padding:'0 2px',lineHeight:1,marginLeft:'2px'}}
-                    title="Remove title"
-                    onMouseEnter={e=>e.target.style.color='var(--red)'}
-                    onMouseLeave={e=>e.target.style.color='var(--white-dim)'}>
-                    ×
-                  </button>
+                    style={{background:'none',border:'none',cursor:'pointer',color:'var(--white-dim)',fontSize:'1rem',padding:'2px 5px',borderRadius:'4px',flexShrink:0}}
+                    title="Remove" onMouseEnter={e=>e.target.style.color='var(--red)'} onMouseLeave={e=>e.target.style.color='var(--white-dim)'}>×</button>
                 </div>
               ))}
             </div>
+
             <div style={{display:'flex',gap:'10px',alignItems:'flex-end'}}>
               <div className="form-group" style={{marginBottom:0,flex:1,maxWidth:'280px'}}>
                 <label className="form-label">Add New Title</label>
@@ -817,8 +864,68 @@ export default function AdminPage() {
                   placeholder="e.g. Senior Foreman..." />
               </div>
               <button className="btn btn-gold btn-sm" onClick={handleAddTitle} disabled={listSaving||!newTitle.trim()}>
-                {listSaving ? '...' : '+ Add Title'}
+                {listSaving?'...':'+ Add Title'}
               </button>
+            </div>
+          </div>
+
+          {/* ── SYSTEM LISTS (read-only download) ── */}
+          <div className="card">
+            <div className="card-title"><span className="icon">📥</span> System Lists — Download Only</div>
+            <p style={{color:'var(--white-dim)',fontSize:'0.8rem',marginBottom:'16px'}}>These lists are built into the system and cannot be edited here, but you can download them as CSV for reference.</p>
+            <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
+
+              {/* Carriers */}
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(0,0,0,0.2)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 16px',flexWrap:'wrap',gap:'8px'}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--white-soft)'}}>SMS Carriers</div>
+                  <div style={{fontSize:'0.75rem',color:'var(--white-dim)',marginTop:'2px'}}>{CARRIERS.filter(c=>c.value).length} carriers — used for SMS gateway routing</div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:'4px',marginTop:'6px'}}>
+                    {CARRIERS.filter(c=>c.value).map(c=>(
+                      <span key={c.value} style={{fontSize:'0.68rem',background:'rgba(255,255,255,0.07)',border:'1px solid var(--border)',borderRadius:'10px',padding:'1px 7px',color:'var(--white-dim)'}}>{c.label}</span>
+                    ))}
+                  </div>
+                </div>
+                <button className="btn btn-outline btn-sm" style={{flexShrink:0}}
+                  onClick={()=>downloadListCsv('sms-carriers.csv',['Label','Gateway Suffix'],CARRIERS.filter(c=>c.value).map(c=>[c.label,c.value]))}>
+                  ⬇️ Download CSV
+                </button>
+              </div>
+
+              {/* Reason Categories */}
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(0,0,0,0.2)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 16px',flexWrap:'wrap',gap:'8px'}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--white-soft)'}}>Spark Reason Categories</div>
+                  <div style={{fontSize:'0.75rem',color:'var(--white-dim)',marginTop:'2px'}}>{REASON_CATEGORIES.length} categories — shown to employees when giving a spark</div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:'4px',marginTop:'6px'}}>
+                    {REASON_CATEGORIES.map(r=>(
+                      <span key={r} style={{fontSize:'0.68rem',background:'rgba(255,255,255,0.07)',border:'1px solid var(--border)',borderRadius:'10px',padding:'1px 7px',color:'var(--white-dim)'}}>{r}</span>
+                    ))}
+                  </div>
+                </div>
+                <button className="btn btn-outline btn-sm" style={{flexShrink:0}}
+                  onClick={()=>downloadListCsv('reason-categories.csv',['Category'],REASON_CATEGORIES.map(r=>[r]))}>
+                  ⬇️ Download CSV
+                </button>
+              </div>
+
+              {/* Spark Frequencies */}
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(0,0,0,0.2)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 16px',flexWrap:'wrap',gap:'8px'}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--white-soft)'}}>Spark Frequencies</div>
+                  <div style={{fontSize:'0.75rem',color:'var(--white-dim)',marginTop:'2px'}}>{FREQUENCY_OPTIONS.length} options — controls how often employees accrue giving allowances</div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:'4px',marginTop:'6px'}}>
+                    {FREQUENCY_OPTIONS.map(f=>(
+                      <span key={f.value} style={{fontSize:'0.68rem',background:'rgba(255,255,255,0.07)',border:'1px solid var(--border)',borderRadius:'10px',padding:'1px 7px',color:'var(--white-dim)'}}>{f.label}</span>
+                    ))}
+                  </div>
+                </div>
+                <button className="btn btn-outline btn-sm" style={{flexShrink:0}}
+                  onClick={()=>downloadListCsv('spark-frequencies.csv',['Value','Label','Reset Description'],FREQUENCY_OPTIONS.map(f=>[f.value,f.label,f.resetDesc]))}>
+                  ⬇️ Download CSV
+                </button>
+              </div>
+
             </div>
           </div>
         </div>
