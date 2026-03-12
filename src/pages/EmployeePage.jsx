@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { assignSparks } from '../lib/sparkHelpers'
-import { REASON_CATEGORIES, buildReason, getFrequencyLabel, getFrequencyResetDesc, getPeriodLabel } from '../lib/constants'
+import { buildReason, getFrequencyLabel, getFrequencyResetDesc, getPeriodLabel, REASON_CATEGORIES as REASON_FALLBACK } from '../lib/constants'
 import { addDays, format, differenceInHours, differenceInDays } from 'date-fns'
 
 const PER_PERSON_CAP = 2
@@ -31,6 +31,7 @@ export default function EmployeePage() {
   const [watchlistIds, setWatchlistIds] = useState([])
   const [watchlistTxns, setWatchlistTxns] = useState([])
   const [watchlistEditing, setWatchlistEditing] = useState(false)
+  const [reasonCategories, setReasonCategories] = useState(REASON_FALLBACK)
 
   const isManagement = me?.is_management || false
   const hasList = me?.has_spark_list || false
@@ -54,6 +55,10 @@ export default function EmployeePage() {
       .select('id, first_name, last_name, job_title')
       .eq('is_admin', false).neq('id', currentUser.id).order('last_name')
     if (emps) setEmployees(emps)
+    // Load live reason categories (fall back to hardcoded if DB is empty)
+    const { data: reasonRows } = await supabase.from('custom_lists')
+      .select('value').eq('list_type', 'reason_category').order('sort_order')
+    if (reasonRows && reasonRows.length > 0) setReasonCategories(reasonRows.map(r => r.value))
     const { data: givenRows } = await supabase.from('daily_given')
       .select('to_employee_id, amount').eq('from_employee_id', currentUser.id).eq('given_date', today)
     if (givenRows) { const m = {}; givenRows.forEach(r => { m[r.to_employee_id] = r.amount }); setGivenToday(m) }
@@ -253,7 +258,7 @@ export default function EmployeePage() {
                   <select className="form-select" value={reasonCat} onChange={e => setReasonCat(e.target.value)}
                     style={!reasonCat && selEmp ? {borderColor:'rgba(224,85,85,0.5)'} : {}}>
                     <option value="">Select category...</option>
-                    {REASON_CATEGORIES.map(r => <option key={r} value={r}>{r}</option>)}
+                    {reasonCategories.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
                 <div className="form-group" style={{marginBottom:'8px'}}>
@@ -295,7 +300,7 @@ export default function EmployeePage() {
                 <label className="form-label">Category <span style={{color:'var(--red)'}}>*</span></label>
                 <select className="form-select" value={listReasonCat} onChange={e => setListReasonCat(e.target.value)}>
                   <option value="">Select category...</option>
-                  {REASON_CATEGORIES.map(r => <option key={r} value={r}>{r}</option>)}
+                  {reasonCategories.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
               </div>
               <div className="form-group" style={{marginBottom:'8px'}}>

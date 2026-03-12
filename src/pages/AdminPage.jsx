@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
-import { MANAGEMENT_GRADES, FREQUENCY_OPTIONS, CARRIERS, LEADERBOARD_RANGE_OPTIONS, REASON_CATEGORIES, getFrequencyLabel } from '../lib/constants'
+import { MANAGEMENT_GRADES, FREQUENCY_OPTIONS, CARRIERS, LEADERBOARD_RANGE_OPTIONS, getFrequencyLabel } from '../lib/constants'
 import { sendTestNotification, isBeforeGoLive } from '../lib/notificationService'
 
 // ── Hardcoded fallback lists (used only if DB is empty) ───────────────────────
@@ -106,14 +106,16 @@ export default function AdminPage() {
   const [beforeGoLive, setBeforeGoLive] = useState(true)
 
   // ── Live lists (from DB) ──────────────────────────────────────────────────
-  const [gradeItems, setGradeItems] = useState([])  // { value, sort_order }
+  const [gradeItems, setGradeItems] = useState([])  // { id, value, sort_order }
   const [titleItems, setTitleItems] = useState([])
+  const [reasonItems, setReasonItems] = useState([])
   const grades = ['', ...gradeItems.map(g => g.value)]
   const titles = ['', ...titleItems.map(t => t.value)]
 
   // ── List editor state ────────────────────────────────────────────────────
   const [newGrade, setNewGrade] = useState('')
   const [newTitle, setNewTitle] = useState('')
+  const [newReason, setNewReason] = useState('')
   const [listSaving, setListSaving] = useState(false)
 
   // ── Batch unknown-value prompt queue ─────────────────────────────────────
@@ -168,10 +170,52 @@ export default function AdminPage() {
 
   const fetchLists = async () => {
     const { data } = await supabase.from('custom_lists').select('*').order('sort_order')
-    if (data) {
-      setGradeItems(data.filter(d => d.list_type === 'job_grade'))
-      setTitleItems(data.filter(d => d.list_type === 'job_title'))
+    const rows = data || []
+    const gradeRows  = rows.filter(d => d.list_type === 'job_grade')
+    const titleRows  = rows.filter(d => d.list_type === 'job_title')
+    const reasonRows = rows.filter(d => d.list_type === 'reason_category')
+
+    // Auto-seed from defaults if the DB returned empty for that list type
+    // (handles the case where migration ran but seeding was skipped)
+    if (gradeRows.length === 0) {
+      const inserts = DEFAULT_GRADES.map((v,i) => ({ list_type:'job_grade', value:v, sort_order:i+1 }))
+      await supabase.from('custom_lists').insert(inserts)
+      const { data: fresh } = await supabase.from('custom_lists').select('*').order('sort_order')
+      const r = fresh || []
+      setGradeItems(r.filter(d => d.list_type === 'job_grade'))
+      setTitleItems(r.filter(d => d.list_type === 'job_title'))
+      setReasonItems(r.filter(d => d.list_type === 'reason_category'))
+      return
     }
+    if (titleRows.length === 0) {
+      const inserts = DEFAULT_TITLES.map((v,i) => ({ list_type:'job_title', value:v, sort_order:i+1 }))
+      await supabase.from('custom_lists').insert(inserts)
+      const { data: fresh } = await supabase.from('custom_lists').select('*').order('sort_order')
+      const r = fresh || []
+      setGradeItems(r.filter(d => d.list_type === 'job_grade'))
+      setTitleItems(r.filter(d => d.list_type === 'job_title'))
+      setReasonItems(r.filter(d => d.list_type === 'reason_category'))
+      return
+    }
+    if (reasonRows.length === 0) {
+      const DEFAULT_REASONS = [
+        'Going Above & Beyond','Teamwork & Collaboration','Customer Service Excellence',
+        'Safety Leadership','Problem Solving','Mentoring & Training',
+        'Reliability & Dependability','Innovation & Initiative','Positive Attitude','Other',
+      ]
+      const inserts = DEFAULT_REASONS.map((v,i) => ({ list_type:'reason_category', value:v, sort_order:i+1 }))
+      await supabase.from('custom_lists').insert(inserts)
+      const { data: fresh } = await supabase.from('custom_lists').select('*').order('sort_order')
+      const r = fresh || []
+      setGradeItems(r.filter(d => d.list_type === 'job_grade'))
+      setTitleItems(r.filter(d => d.list_type === 'job_title'))
+      setReasonItems(r.filter(d => d.list_type === 'reason_category'))
+      return
+    }
+
+    setGradeItems(gradeRows)
+    setTitleItems(titleRows)
+    setReasonItems(reasonRows)
   }
 
   // ── Add a single value to a list, inserting at smartInsertOrder position ──
@@ -238,6 +282,16 @@ export default function AdminPage() {
     if (result.error) { showMsg('error', result.error); return }
     setNewTitle(''); fetchLists()
     showMsg('success', `Title "${newTitle.trim()}" added`)
+  }
+
+  const handleAddReason = async () => {
+    if (!newReason.trim()) return
+    setListSaving(true)
+    const result = await addListItem('reason_category', newReason, reasonItems)
+    setListSaving(false)
+    if (result.error) { showMsg('error', result.error); return }
+    setNewReason(''); fetchLists()
+    showMsg('success', `Reason "${newReason.trim()}" added`)
   }
 
   // ── BATCH pre-validation ───────────────────────────────────────────────────
@@ -869,6 +923,45 @@ export default function AdminPage() {
             </div>
           </div>
 
+          {/* ── SPARK REASON CATEGORIES ── */}
+          <div className="card" style={{marginBottom:'16px'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px',marginBottom:'6px'}}>
+              <div className="card-title" style={{marginBottom:0}}><span className="icon">💬</span> Spark Reason Categories ({reasonItems.length})</div>
+              <button className="btn btn-outline btn-sm" onClick={()=>downloadListCsv('reason-categories.csv',['Order','Category'],reasonItems.map((r,i)=>[i+1,r.value]))}>⬇️ Download CSV</button>
+            </div>
+            <p style={{color:'var(--white-dim)',fontSize:'0.8rem',marginBottom:'14px'}}>Shown to employees when giving a spark. Reorder, add, or remove as needed.</p>
+
+            <div style={{display:'flex',flexDirection:'column',gap:'6px',marginBottom:'18px'}}>
+              {reasonItems.map((item, i) => (
+                <div key={item.id} style={{display:'flex',alignItems:'center',gap:'8px',background:'rgba(94,232,138,0.04)',border:'1px solid rgba(94,232,138,0.15)',borderRadius:'8px',padding:'8px 12px'}}>
+                  <span style={{fontSize:'0.68rem',color:'var(--white-dim)',width:'22px',textAlign:'right',flexShrink:0}}>#{i+1}</span>
+                  <div style={{display:'flex',flexDirection:'column',gap:'1px',flexShrink:0}}>
+                    <button onClick={()=>moveListItem(item,reasonItems,'up')} disabled={i===0||listSaving}
+                      style={{background:'none',border:'none',cursor:i===0?'default':'pointer',color:i===0?'rgba(255,255,255,0.15)':'var(--white-dim)',fontSize:'0.7rem',padding:'0 3px',lineHeight:1.2}}>▲</button>
+                    <button onClick={()=>moveListItem(item,reasonItems,'down')} disabled={i===reasonItems.length-1||listSaving}
+                      style={{background:'none',border:'none',cursor:i===reasonItems.length-1?'default':'pointer',color:i===reasonItems.length-1?'rgba(255,255,255,0.15)':'var(--white-dim)',fontSize:'0.7rem',padding:'0 3px',lineHeight:1.2}}>▼</button>
+                  </div>
+                  <span style={{flex:1,fontWeight:600,fontSize:'0.88rem',color:'var(--white-soft)'}}>{item.value}</span>
+                  <button onClick={()=>{if(window.confirm(`Remove reason "${item.value}"? This won't affect past spark records.`)) removeListItem(item.id)}}
+                    style={{background:'none',border:'none',cursor:'pointer',color:'var(--white-dim)',fontSize:'1rem',padding:'2px 5px',borderRadius:'4px',flexShrink:0}}
+                    title="Remove" onMouseEnter={e=>e.target.style.color='var(--red)'} onMouseLeave={e=>e.target.style.color='var(--white-dim)'}>×</button>
+                </div>
+              ))}
+            </div>
+
+            <div style={{display:'flex',gap:'10px',alignItems:'flex-end'}}>
+              <div className="form-group" style={{marginBottom:0,flex:1,maxWidth:'380px'}}>
+                <label className="form-label">Add New Category</label>
+                <input className="form-input" value={newReason} onChange={e=>setNewReason(e.target.value)}
+                  onKeyDown={e=>e.key==='Enter'&&handleAddReason()}
+                  placeholder="e.g. Leadership, Community Service..." />
+              </div>
+              <button className="btn btn-gold btn-sm" onClick={handleAddReason} disabled={listSaving||!newReason.trim()}>
+                {listSaving?'...':'+ Add Category'}
+              </button>
+            </div>
+          </div>
+
           {/* ── SYSTEM LISTS (read-only download) ── */}
           <div className="card">
             <div className="card-title"><span className="icon">📥</span> System Lists — Download Only</div>
@@ -888,23 +981,6 @@ export default function AdminPage() {
                 </div>
                 <button className="btn btn-outline btn-sm" style={{flexShrink:0}}
                   onClick={()=>downloadListCsv('sms-carriers.csv',['Label','Gateway Suffix'],CARRIERS.filter(c=>c.value).map(c=>[c.label,c.value]))}>
-                  ⬇️ Download CSV
-                </button>
-              </div>
-
-              {/* Reason Categories */}
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(0,0,0,0.2)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 16px',flexWrap:'wrap',gap:'8px'}}>
-                <div>
-                  <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--white-soft)'}}>Spark Reason Categories</div>
-                  <div style={{fontSize:'0.75rem',color:'var(--white-dim)',marginTop:'2px'}}>{REASON_CATEGORIES.length} categories — shown to employees when giving a spark</div>
-                  <div style={{display:'flex',flexWrap:'wrap',gap:'4px',marginTop:'6px'}}>
-                    {REASON_CATEGORIES.map(r=>(
-                      <span key={r} style={{fontSize:'0.68rem',background:'rgba(255,255,255,0.07)',border:'1px solid var(--border)',borderRadius:'10px',padding:'1px 7px',color:'var(--white-dim)'}}>{r}</span>
-                    ))}
-                  </div>
-                </div>
-                <button className="btn btn-outline btn-sm" style={{flexShrink:0}}
-                  onClick={()=>downloadListCsv('reason-categories.csv',['Category'],REASON_CATEGORIES.map(r=>[r]))}>
                   ⬇️ Download CSV
                 </button>
               </div>
