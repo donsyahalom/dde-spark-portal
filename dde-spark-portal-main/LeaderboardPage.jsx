@@ -5,7 +5,6 @@ import LeaderboardPage from './pages/LeaderboardPage'
 import EmployeePage from './pages/EmployeePage'
 import AdminPage from './pages/AdminPage'
 import ChangePasswordPage from './pages/ChangePasswordPage'
-import MessageBoardPage from './pages/MessageBoardPage'
 import Layout from './components/Layout'
 import './styles.css'
 
@@ -25,12 +24,13 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={currentUser ? <Navigate to="/leaderboard" /> : <LoginPage />} />
-      <Route path="/change-password" element={<ProtectedRoute><ChangePasswordPage /></ProtectedRoute>} />
+      <Route path="/change-password" element={
+        <ProtectedRoute><ChangePasswordPage /></ProtectedRoute>
+      } />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<Navigate to="/leaderboard" />} />
         <Route path="leaderboard" element={<LeaderboardPage />} />
         <Route path="my-sparks" element={<EmployeePage />} />
-        <Route path="board" element={<MessageBoardPage />} />
         <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/leaderboard" />} />

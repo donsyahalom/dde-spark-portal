@@ -4,23 +4,37 @@ import { useAuth } from '../context/AuthContext'
 export default function Layout() {
   const { currentUser, logout } = useAuth()
   const navigate = useNavigate()
-  const handleLogout = () => { logout(); navigate('/login') }
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
+
   return (
     <div className="app-layout">
       <header className="header">
         <div className="header-left">
-          <img src="/logo.png" alt="DDE Logo" className="header-logo" onError={e=>{e.target.style.display='none'}} />
+          <img src="/logo.png" alt="DDE Logo" className="header-logo"
+            onError={e => { e.target.style.display='none' }} />
           <span className="header-title">DDE Spark Portal</span>
         </div>
         <nav className="header-nav">
-          <NavLink to="/leaderboard" className={({isActive})=>`nav-btn${isActive?' active':''}`}>🏆 Board</NavLink>
+          <NavLink to="/leaderboard" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
+            🏆 Board
+          </NavLink>
           {!currentUser?.is_admin && (
-            <NavLink to="/my-sparks" className={({isActive})=>`nav-btn${isActive?' active':''}`}>✨ My Sparks</NavLink>
+            <NavLink to="/my-sparks" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
+              ✨ My Sparks
+            </NavLink>
           )}
-          <NavLink to="/board" className={({isActive})=>`nav-btn${isActive?' active':''}`}>📢 Company</NavLink>
           {currentUser?.is_admin && (
-            <NavLink to="/admin" className={({isActive})=>`nav-btn${isActive?' active':''}`}>⚙️ Admin</NavLink>
+            <NavLink to="/admin" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
+              ⚙️ Admin
+            </NavLink>
           )}
+          <NavLink to="/my-sparks" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}
+            style={currentUser?.is_admin ? {display:'none'} : {}}>
+          </NavLink>
           <span className="user-badge" style={{marginLeft:'8px'}}>
             {currentUser?.first_name}
             {!currentUser?.is_admin && (
@@ -31,7 +45,9 @@ export default function Layout() {
           <button className="nav-btn logout" onClick={handleLogout}>Logout</button>
         </nav>
       </header>
-      <main className="main-content"><Outlet /></main>
+      <main className="main-content">
+        <Outlet />
+      </main>
     </div>
   )
 }
