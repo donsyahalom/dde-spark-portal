@@ -1,8 +1,56 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { JOB_GRADES, JOB_TITLES, MANAGEMENT_GRADES, FREQUENCY_OPTIONS, CARRIERS, LEADERBOARD_RANGE_OPTIONS, getFrequencyLabel } from '../lib/constants'
 import { sendTestNotification, isBeforeGoLive } from '../lib/notificationService'
+
+// ── Dual-scrollbar wrapper ────────────────────────────────────────────────────
+// Renders a phantom top scrollbar that mirrors the real bottom one.
+function DualScrollTable({ children }) {
+  const outerRef = useRef(null)   // real scroll container (bottom)
+  const topRef   = useRef(null)   // phantom top bar
+  const syncingOuter = useRef(false)
+  const syncingTop   = useRef(false)
+
+  // Keep phantom width in sync with table width
+  const phantomRef = useRef(null)
+  const syncWidth = useCallback(() => {
+    if (!outerRef.current || !phantomRef.current) return
+    phantomRef.current.style.width = outerRef.current.scrollWidth + 'px'
+  }, [])
+
+  useEffect(() => {
+    syncWidth()
+    const ro = new ResizeObserver(syncWidth)
+    if (outerRef.current) ro.observe(outerRef.current)
+    return () => ro.disconnect()
+  }, [syncWidth])
+
+  const onTopScroll = () => {
+    if (syncingTop.current) { syncingTop.current = false; return }
+    syncingOuter.current = true
+    if (outerRef.current && topRef.current) outerRef.current.scrollLeft = topRef.current.scrollLeft
+  }
+  const onOuterScroll = () => {
+    if (syncingOuter.current) { syncingOuter.current = false; return }
+    syncingTop.current = true
+    if (topRef.current && outerRef.current) topRef.current.scrollLeft = outerRef.current.scrollLeft
+  }
+
+  return (
+    <div>
+      {/* Top phantom scrollbar */}
+      <div ref={topRef} onScroll={onTopScroll}
+        style={{overflowX:'auto',overflowY:'hidden',height:'16px',marginBottom:'2px',background:'transparent'}}>
+        <div ref={phantomRef} style={{height:'1px'}}></div>
+      </div>
+      {/* Real table */}
+      <div ref={outerRef} onScroll={onOuterScroll} style={{overflowX:'auto',paddingBottom:'4px'}}>
+        {children}
+      </div>
+    </div>
+  )
+}
 
 const TYPE_LABELS = {
   assign:       { label:'Peer Spark',  color:'gold' },
@@ -141,24 +189,67 @@ export default function AdminPage() {
   const addBatch = async () => {
     const lines = batchText.trim().split('\n').filter(l=>l.trim())
     if (!lines.length) return
-    setLoading(true); let added=0, errors=0
+    setLoading(true)
+    let added=0, updated=0, errors=0, errorDetails=[]
+
     for (const line of lines) {
-      const [fn,ln,phone,email,init,accrual,grade,title] = line.split(',').map(s=>s?.trim())
-      if (!fn||!ln||!email) { errors++; continue }
-      const a = parseInt(accrual)||0
-      const { error } = await supabase.from('employees').insert({
-        first_name:fn, last_name:ln, phone:phone||'', email:email.toLowerCase(),
-        password_hash:'spark123', must_change_password:true,
-        vested_sparks:0, unvested_sparks:parseInt(init)||0,
-        daily_accrual:a, daily_sparks_remaining:a,
-        job_grade:grade||'', job_title:title||'',
-        is_management: MANAGEMENT_GRADES.includes(grade||''),
-      })
-      if (error) errors++; else added++
+      // Split by comma, trim each field
+      const parts = line.split(',').map(s=>s?.trim())
+      const [fn, ln, phone, email, init, accrual, grade, title, isMgmt, hasList, notifEmail, notifSms, carrier] = parts
+      if (!fn || !ln || !email) { errors++; errorDetails.push(`Missing required fields: ${line.substring(0,60)}`); continue }
+
+      const emailLower = email.toLowerCase()
+      const a = parseInt(accrual) || 0
+      const initSparks = parseInt(init) || 0
+      const isManagementVal = isMgmt?.toLowerCase()==='true' || MANAGEMENT_GRADES.includes(grade||'')
+      const hasSparkListVal = hasList?.toLowerCase()==='true'
+      const notifyEmailVal = notifEmail?.toLowerCase()!=='false'  // default true
+      const notifySmsVal = notifSms?.toLowerCase()==='true'       // default false
+      const carrierVal = carrier || ''
+
+      // Check if employee exists by email
+      const { data: existing } = await supabase.from('employees').select('id, vested_sparks, unvested_sparks').eq('email', emailLower).single()
+
+      if (existing) {
+        // UPDATE existing employee — replace all provided fields
+        const updatePayload = {
+          first_name: fn, last_name: ln, phone: phone||'', email: emailLower,
+          daily_accrual: a, daily_sparks_remaining: a,
+          job_grade: grade||'', job_title: title||'',
+          is_management: isManagementVal, has_spark_list: hasSparkListVal,
+          notify_email: notifyEmailVal, notify_sms: notifySmsVal,
+          carrier: carrierVal, updated_at: new Date().toISOString()
+        }
+        // Only update sparks if a non-zero initial value was provided
+        if (initSparks > 0) {
+          updatePayload.unvested_sparks = initSparks
+        }
+        const { error } = await supabase.from('employees').update(updatePayload).eq('id', existing.id)
+        if (error) { errors++; errorDetails.push(`Update failed for ${emailLower}: ${error.message}`) }
+        else updated++
+      } else {
+        // INSERT new employee
+        const { error } = await supabase.from('employees').insert({
+          first_name: fn, last_name: ln, phone: phone||'', email: emailLower,
+          password_hash: 'spark123', must_change_password: true,
+          vested_sparks: 0, unvested_sparks: initSparks,
+          daily_accrual: a, daily_sparks_remaining: a,
+          job_grade: grade||'', job_title: title||'',
+          is_management: isManagementVal, has_spark_list: hasSparkListVal,
+          notify_email: notifyEmailVal, notify_sms: notifySmsVal,
+          carrier: carrierVal,
+        })
+        if (error) { errors++; errorDetails.push(`Insert failed for ${emailLower}: ${error.message}`) }
+        else added++
+      }
     }
+
     setLoading(false)
-    showMsg(errors?'warning':'success', `Added ${added}.${errors?` ${errors} failed.`:''}`)
-    setBatchText(''); fetchAll()
+    const summary = [`✅ ${added} added`, `🔄 ${updated} updated`, errors ? `❌ ${errors} failed` : ''].filter(Boolean).join(' · ')
+    showMsg(errors ? 'warning' : 'success', summary)
+    if (errorDetails.length) console.error('Batch errors:', errorDetails)
+    if (!errors) setBatchText('')
+    fetchAll()
   }
 
   const removeEmployee = async (emp) => {
@@ -341,31 +432,41 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
               <button className={`sort-btn${sortMode==='ranking'?' active':''}`} onClick={()=>setSortMode('ranking')}>🏆 Ranking</button>
             </div>
           </div>
-          <div className="table-wrap">
-            <table>
+          {/* Dual scrollbar: top mirror + bottom native */}
+          <DualScrollTable>
+            <table style={{minWidth:'1300px'}}>
               <thead>
                 <tr>
-                  <th>Name</th><th>Grade</th><th>Title</th><th>Email</th><th>Phone</th><th>Carrier</th>
+                  {/* Identity + spark numbers + actions — immediately visible */}
+                  <th style={{position:'sticky',left:0,background:'var(--bg-darker)',zIndex:2}}>Name</th>
+                  <th>Grade</th>
+                  <th>Title</th>
                   <th>Vested</th><th>Unvested</th><th>Redeemed</th><th>Total</th>
-                  <th>Left/{freqLabel}</th><th>Notify</th><th>Flags</th><th>Actions</th>
+                  <th>Left/{freqLabel}</th>
+                  <th>Notify</th>
+                  <th>Flags</th>
+                  <th>Actions</th>
+                  {/* Contact details — scrolled into view */}
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Carrier / SMS Address</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedEmployees.map(emp => {
                   const total=(emp.vested_sparks||0)+(emp.unvested_sparks||0)+(emp.redeemed_sparks||0)
+                  const carrierLabel = CARRIERS.find(c=>c.value===emp.carrier)?.label||'—'
+                  const smsAddr = emp.phone && emp.carrier ? emp.phone.replace(/\D/g,'').slice(-10)+emp.carrier : null
                   return (
                     <tr key={emp.id}>
-                      <td style={{fontWeight:600,whiteSpace:'nowrap'}}>{emp.first_name} {emp.last_name}</td>
-                      <td><span style={{fontSize:'0.72rem',padding:'2px 5px',background:'rgba(240,192,64,0.1)',borderRadius:'4px',color:'var(--gold)'}}>{emp.job_grade||'—'}</span></td>
-                      <td style={{fontSize:'0.78rem'}}>{emp.job_title||'—'}</td>
-                      <td style={{fontSize:'0.72rem'}}>{emp.email}</td>
-                      <td style={{fontSize:'0.72rem'}}>{emp.phone||'—'}</td>
-                      <td style={{fontSize:'0.72rem',color:'var(--white-dim)'}}>{CARRIERS.find(c=>c.value===emp.carrier)?.label||'—'}</td>
+                      <td style={{fontWeight:600,whiteSpace:'nowrap',position:'sticky',left:0,background:'rgba(17,46,28,0.97)',zIndex:1}}>{emp.first_name} {emp.last_name}</td>
+                      <td><span style={{fontSize:'0.72rem',padding:'2px 6px',background:'rgba(240,192,64,0.1)',borderRadius:'4px',color:'var(--gold)',whiteSpace:'nowrap'}}>{emp.job_grade||'—'}</span></td>
+                      <td style={{fontSize:'0.78rem',whiteSpace:'nowrap'}}>{emp.job_title||'—'}</td>
                       <td><span className="spark-badge">✨ {emp.vested_sparks||0}</span></td>
                       <td style={{color:'var(--white-dim)'}}>{emp.unvested_sparks||0}</td>
                       <td style={{color:'var(--green-bright)',fontWeight:600}}>{emp.redeemed_sparks||0}</td>
                       <td style={{fontWeight:700,color:'var(--gold)'}}>{total}</td>
-                      <td>{emp.daily_sparks_remaining||0}/{emp.daily_accrual||0}</td>
+                      <td style={{whiteSpace:'nowrap'}}>{emp.daily_sparks_remaining||0}/{emp.daily_accrual||0}</td>
                       <td>
                         <div style={{display:'flex',gap:'3px'}}>
                           {emp.notify_email&&<span className="chip chip-gold" style={{fontSize:'0.6rem',padding:'1px 5px'}}>📧</span>}
@@ -379,18 +480,25 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
                         </div>
                       </td>
                       <td>
-                        <div style={{display:'flex',gap:'3px',flexWrap:'wrap'}}>
+                        <div style={{display:'flex',gap:'3px',flexWrap:'nowrap'}}>
                           <button className="btn btn-outline btn-xs" onClick={()=>openEdit(emp)}>Edit</button>
                           <button className="btn btn-xs" style={{background:'rgba(94,232,138,0.2)',color:'var(--green-bright)',border:'1px solid rgba(94,232,138,0.3)'}} onClick={()=>{setCashoutEmp(emp);setCashoutSparks('');setCashoutValue('');setCashoutNote('')}}>💰</button>
                           <button className="btn btn-danger btn-xs" onClick={()=>removeEmployee(emp)}>✕</button>
                         </div>
+                      </td>
+                      {/* Contact details — at end */}
+                      <td style={{fontSize:'0.72rem',maxWidth:'180px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{emp.email}</td>
+                      <td style={{fontSize:'0.72rem',whiteSpace:'nowrap'}}>{emp.phone||'—'}</td>
+                      <td style={{fontSize:'0.7rem'}}>
+                        <div style={{color:'var(--white-dim)'}}>{carrierLabel}</div>
+                        {smsAddr&&<div style={{color:'var(--gold-dark)',fontFamily:'monospace',fontSize:'0.65rem',marginTop:'2px'}}>{smsAddr}</div>}
                       </td>
                     </tr>
                   )
                 })}
               </tbody>
             </table>
-          </div>
+          </DualScrollTable>
         </div>
       )}
 
@@ -440,13 +548,46 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
       {/* BATCH IMPORT */}
       {tab==='batch'&&(
         <div className="card">
-          <div className="card-title"><span className="icon">📋</span> Batch Import</div>
-          <div className="alert alert-warning"><strong>Format:</strong> <code>FirstName, LastName, Phone, Email, InitialSparks, DailyAccrual, JobGrade, JobTitle</code></div>
-          <div className="form-group" style={{marginTop:'14px'}}>
-            <label className="form-label">CSV Data</label>
-            <textarea className="form-textarea" rows={10} value={batchText} onChange={e=>setBatchText(e.target.value)} placeholder="John,Smith,555-1234,john@dde.com,0,2,J1,Journeyman" />
+          <div className="card-title"><span className="icon">📋</span> Batch Import / Update</div>
+
+          {/* Format reference */}
+          <div style={{background:'rgba(0,0,0,0.3)',border:'1px solid var(--border)',borderRadius:'8px',padding:'14px 16px',marginBottom:'16px'}}>
+            <div style={{fontFamily:'var(--font-display)',fontSize:'0.72rem',color:'var(--gold)',letterSpacing:'0.08em',marginBottom:'8px'}}>CSV FORMAT — ONE EMPLOYEE PER LINE</div>
+            <code style={{fontSize:'0.72rem',color:'var(--white-soft)',display:'block',lineHeight:1.7,wordBreak:'break-all'}}>
+              FirstName, LastName, Phone, Email, InitialSparks, DailyAccrual, JobGrade, JobTitle, IsManagement, HasSparkList, NotifyEmail, NotifySMS, Carrier
+            </code>
+            <div style={{marginTop:'10px',display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:'4px 16px'}}>
+              {[
+                ['FirstName','Required'],['LastName','Required'],['Phone','Optional, digits only'],
+                ['Email','Required — used as unique key'],['InitialSparks','Number, default 0'],
+                ['DailyAccrual','Number, default 0'],['JobGrade','e.g. J1, F2, P1, Owner'],
+                ['JobTitle','e.g. Journeyman, Foreman'],['IsManagement','true or false'],
+                ['HasSparkList','true or false'],['NotifyEmail','true or false, default true'],
+                ['NotifySMS','true or false, default false'],
+                ['Carrier','Gateway suffix: @tmomail.net, @vtext.com, etc.'],
+              ].map(([field,desc])=>(
+                <div key={field} style={{fontSize:'0.7rem'}}>
+                  <span style={{color:'var(--gold-light)',fontWeight:600}}>{field}</span>
+                  <span style={{color:'var(--white-dim)'}}> — {desc}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <button className="btn btn-gold" onClick={addBatch} disabled={loading||!batchText.trim()}>{loading?'Importing...':'📋 Import'}</button>
+
+          <div style={{background:'rgba(224,85,85,0.12)',border:'1px solid rgba(224,85,85,0.3)',borderRadius:'8px',padding:'10px 14px',marginBottom:'16px',fontSize:'0.82rem'}}>
+            <strong style={{color:'var(--red)'}}>⚠️ Upsert behavior:</strong>
+            <span style={{color:'var(--white-dim)',marginLeft:'4px'}}>
+              <strong>Email is the unique key.</strong> If a row's email matches an existing employee, their details will be <strong>replaced</strong> with the new values from that row (name, phone, accrual, job info, flags, carrier, etc.). Spark balances are only updated if InitialSparks &gt; 0. Rows with a new email will create a new employee with default password <code style={{color:'var(--gold)'}}>spark123</code>.
+            </span>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">CSV Data</label>
+            <textarea className="form-textarea" rows={12} value={batchText} onChange={e=>setBatchText(e.target.value)}
+              placeholder={`John,Smith,5551234567,john@dde.com,0,2,J1,Journeyman,false,false,true,false,@tmomail.net\nJane,Doe,5559876543,jane@dde.com,0,5,P1,Project Manager,true,true,true,true,@vtext.com`}
+              style={{fontFamily:'monospace',fontSize:'0.8rem'}} />
+          </div>
+          <button className="btn btn-gold" onClick={addBatch} disabled={loading||!batchText.trim()}>{loading?'Importing...':'📋 Import / Update'}</button>
         </div>
       )}
 
@@ -481,6 +622,11 @@ ${content}<script>window.onload=()=>window.print()</script></body></html>`)
               <div className="form-group">
                 <label className="form-label">Management Accrual (P1–P4, Owner)</label>
                 <input className="form-input" type="number" min="0" max="50" value={settings.management_daily_accrual||5} onChange={e=>setSettings(s=>({...s,management_daily_accrual:e.target.value}))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Minimum Redemption Amount</label>
+                <input className="form-input" type="number" min="1" max="500" value={settings.min_redemption_amount||20} onChange={e=>setSettings(s=>({...s,min_redemption_amount:e.target.value}))} />
+                <div style={{fontSize:'0.7rem',color:'var(--white-dim)',marginTop:'4px'}}>Employees are told they must redeem at least this many sparks at once.</div>
               </div>
               {settings.spark_frequency==='biweekly'&&(
                 <div className="form-group">

@@ -11,7 +11,7 @@ export default function EmployeePage() {
   const { currentUser, refreshUser } = useAuth()
   const [me, setMe] = useState(currentUser)
   const [employees, setEmployees] = useState([])
-  const [settings, setSettings] = useState({ vesting_period_days: 30, spark_frequency: 'daily' })
+  const [settings, setSettings] = useState({ vesting_period_days: 30, spark_frequency: 'daily', min_redemption_amount: 20 })
   const [givenToday, setGivenToday] = useState({})
   const [ctToday, setCtToday] = useState(null)
   const [nextReset, setNextReset] = useState(null)
@@ -47,7 +47,7 @@ export default function EmployeePage() {
     const sObj = {}
     if (sData) sData.forEach(s => { sObj[s.key] = s.value })
     const freq = sObj.spark_frequency || 'daily'
-    setSettings({ vesting_period_days: parseInt(sObj.vesting_period_days || 30), spark_frequency: freq })
+    setSettings({ vesting_period_days: parseInt(sObj.vesting_period_days || 30), spark_frequency: freq, min_redemption_amount: parseInt(sObj.min_redemption_amount || 20) })
     const { data: resetTime } = await supabase.rpc('get_next_reset', { freq })
     setNextReset(resetTime)
     const { data: emps } = await supabase.from('employees')
@@ -200,6 +200,15 @@ export default function EmployeePage() {
           </div>
           <div className="stat-label">{freqLabel} Sparks Left</div>
         </div>
+      </div>
+
+      {/* Redemption notice */}
+      <div style={{background:'rgba(240,192,64,0.08)',border:'1px solid rgba(240,192,64,0.25)',borderRadius:'10px',padding:'12px 16px',marginBottom:'20px',display:'flex',alignItems:'flex-start',gap:'10px'}}>
+        <span style={{fontSize:'1.1rem',flexShrink:0}}>💰</span>
+        <p style={{fontSize:'0.85rem',color:'var(--white-dim)',margin:0,lineHeight:1.5}}>
+          <strong style={{color:'var(--gold)'}}>Want to redeem your sparks?</strong> Please contact your admin to redeem your sparks.
+          {' '}<span style={{color:'var(--white-soft)'}}>Note: you must redeem a minimum of <strong style={{color:'var(--gold)'}}>{settings.min_redemption_amount}</strong> sparks at once.</span>
+        </p>
       </div>
 
       {/* GIVE A SPARK */}

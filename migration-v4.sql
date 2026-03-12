@@ -223,3 +223,6 @@ GRANT EXECUTE ON FUNCTION apply_go_live_reset() TO anon;
 
 -- 16. Storage bucket for documents (run once)
 -- INSERT INTO storage.buckets (id, name, public) VALUES ('company-docs', 'company-docs', true) ON CONFLICT DO NOTHING;
+
+-- v4.1 addition: minimum redemption amount setting
+INSERT INTO settings (key, value) VALUES ('min_redemption_amount', '20') ON CONFLICT (key) DO NOTHING;
