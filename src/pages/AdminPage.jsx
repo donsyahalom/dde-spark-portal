@@ -130,6 +130,10 @@ export default function AdminPage() {
   const [batchText, setBatchText] = useState('')
   const [editEmp, setEditEmp] = useState(null)
   const [editValues, setEditValues] = useState({})
+  const [resetPassEmp, setResetPassEmp] = useState(null)
+  const [resetPassValue, setResetPassValue] = useState('')
+  const [resetPassConfirm, setResetPassConfirm] = useState('')
+  const [resetPassError, setResetPassError] = useState('')
   const [cashoutEmp, setCashoutEmp] = useState(null)
   const [cashoutSparks, setCashoutSparks] = useState('')
   const [cashoutValue, setCashoutValue] = useState('')
@@ -489,6 +493,27 @@ export default function AdminPage() {
     showMsg('success', `${emp.first_name} ${emp.last_name} removed`); fetchAll()
   }
 
+  const openResetPassword = (emp) => {
+    setResetPassEmp(emp)
+    setResetPassValue('')
+    setResetPassConfirm('')
+    setResetPassError('')
+  }
+
+  const saveResetPassword = async () => {
+    if (resetPassValue.length < 6) { setResetPassError('Password must be at least 6 characters'); return }
+    if (resetPassValue !== resetPassConfirm) { setResetPassError('Passwords do not match'); return }
+    setLoading(true)
+    const { error } = await supabase
+      .from('employees')
+      .update({ password_hash: resetPassValue, must_change_password: true })
+      .eq('id', resetPassEmp.id)
+    setLoading(false)
+    if (error) { setResetPassError('Failed to update password: ' + error.message); return }
+    setResetPassEmp(null)
+    showMsg('success', `🔑 Password reset for ${resetPassEmp.first_name} ${resetPassEmp.last_name}. They'll be prompted to change it on next login.`)
+  }
+
   const openEdit = (emp) => {
     setEditEmp(emp)
     setEditValues({
@@ -695,6 +720,7 @@ export default function AdminPage() {
                       <td>
                         <div style={{display:'flex',gap:'3px',flexWrap:'nowrap'}}>
                           <button className="btn btn-outline btn-xs" onClick={()=>openEdit(emp)}>Edit</button>
+                          <button className="btn btn-outline btn-xs" style={{color:'var(--gold)',borderColor:'rgba(240,192,64,0.4)'}} onClick={()=>openResetPassword(emp)} title="Reset Password">🔑</button>
                           <button className="btn btn-xs" style={{background:'rgba(94,232,138,0.2)',color:'var(--green-bright)',border:'1px solid rgba(94,232,138,0.3)'}} onClick={()=>{setCashoutEmp(emp);setCashoutSparks('');setCashoutValue('');setCashoutNote('')}}>💰</button>
                           <button className="btn btn-danger btn-xs" onClick={()=>removeEmployee(emp)}>✕</button>
                         </div>
@@ -1313,6 +1339,38 @@ export default function AdminPage() {
             <div style={{display:'flex',gap:'10px'}}>
               <button className="btn btn-sm" style={{background:'var(--green-bright)',color:'#000',fontFamily:'var(--font-display)',fontSize:'0.72rem',letterSpacing:'0.1em'}} onClick={processCashout} disabled={loading||!cashoutSparks}>{loading?'Processing...':'💰 Process Cash Out'}</button>
               <button className="btn btn-outline" onClick={()=>setCashoutEmp(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── RESET PASSWORD MODAL ── */}
+      {resetPassEmp&&(
+        <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setResetPassEmp(null)}>
+          <div className="modal" style={{maxWidth:'420px'}}>
+            <div className="modal-title">🔑 Reset Password — {resetPassEmp.first_name} {resetPassEmp.last_name}</div>
+            <div className="alert alert-warning" style={{marginBottom:'16px'}}>
+              The employee will be required to change their password on next login.
+            </div>
+            {resetPassError && <div className="alert alert-error" style={{marginBottom:'12px'}}>{resetPassError}</div>}
+            <div className="form-group">
+              <label className="form-label">New Password</label>
+              <input className="form-input" type="password" value={resetPassValue}
+                onChange={e=>{setResetPassValue(e.target.value);setResetPassError('')}}
+                placeholder="Min 6 characters" autoFocus />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Confirm New Password</label>
+              <input className="form-input" type="password" value={resetPassConfirm}
+                onChange={e=>{setResetPassConfirm(e.target.value);setResetPassError('')}}
+                placeholder="Re-enter password"
+                onKeyDown={e=>e.key==='Enter'&&saveResetPassword()} />
+            </div>
+            <div style={{display:'flex',gap:'10px'}}>
+              <button className="btn btn-gold" onClick={saveResetPassword} disabled={loading||!resetPassValue||!resetPassConfirm}>
+                {loading?'Saving...':'🔑 Reset Password'}
+              </button>
+              <button className="btn btn-outline" onClick={()=>setResetPassEmp(null)}>Cancel</button>
             </div>
           </div>
         </div>
