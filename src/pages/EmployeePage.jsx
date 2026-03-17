@@ -197,8 +197,12 @@ export default function EmployeePage() {
       <p className="page-subtitle">Recognize your colleagues with sparks</p>
       <div className="stat-grid">
         <div className="stat-card"><div className="stat-value" style={{color:'var(--gold-light)'}}>{totalSparks}</div><div className="stat-label">Total Sparks</div></div>
-        <div className="stat-card"><div className="stat-value">{me?.vested_sparks || 0}</div><div className="stat-label">Vested</div></div>
-        <div className="stat-card"><div className="stat-value" style={{color:'var(--white-dim)'}}>{me?.unvested_sparks || 0}</div><div className="stat-label">Pending Vesting</div></div>
+        {settings.vesting_period_days > 0 && (
+          <>
+            <div className="stat-card"><div className="stat-value">{me?.vested_sparks || 0}</div><div className="stat-label">Vested</div></div>
+            <div className="stat-card"><div className="stat-value" style={{color:'var(--white-dim)'}}>{me?.unvested_sparks || 0}</div><div className="stat-label">Pending Vesting</div></div>
+          </>
+        )}
         <div className="stat-card">
           <div className="stat-value" style={{color: dailyRemaining > 0 ? 'var(--green-bright)' : 'var(--red)'}}>
             {dailyRemaining}<span style={{fontSize:'0.9rem',color:'var(--white-dim)'}}> / {dailyAllowance}</span>
@@ -225,7 +229,7 @@ export default function EmployeePage() {
         ) : (
           <>
             <div className="alert alert-warning" style={{marginBottom:'16px',fontSize:'0.82rem'}}>
-              <strong>Rules:</strong> {dailyAllowance} sparks per {periodLabel} · max {PER_PERSON_CAP} per person · vests in {settings.vesting_period_days} days · resets at {resetDesc}
+              <strong>Rules:</strong> {dailyAllowance} sparks per {periodLabel} · max {PER_PERSON_CAP} per person{settings.vesting_period_days > 0 ? ` · vests in ${settings.vesting_period_days} days` : ''} · resets at {resetDesc}
             </div>
             <div className="form-grid">
               <div className="form-group">
@@ -343,13 +347,13 @@ export default function EmployeePage() {
       {/* SPARKS GIVEN */}
       <div className="card" style={{marginBottom:'20px'}}>
         <div className="card-title"><span className="icon">📤</span> Sparks I've Given</div>
-        <TxnTable rows={historyGiven} mode="given" />
+        <TxnTable rows={historyGiven} mode="given" showVesting={settings.vesting_period_days > 0} />
       </div>
 
       {/* SPARKS RECEIVED */}
       <div className="card" style={{marginBottom:'20px'}}>
         <div className="card-title"><span className="icon">📥</span> Sparks I've Received</div>
-        <TxnTable rows={historyReceived} mode="received" />
+        <TxnTable rows={historyReceived} mode="received" showVesting={settings.vesting_period_days > 0} />
       </div>
 
       {/* WATCHLIST */}
@@ -389,7 +393,7 @@ export default function EmployeePage() {
                   <p style={{fontSize:'0.8rem',color:'var(--white-dim)',marginBottom:'12px'}}>Watching {watchlistIds.length} employee{watchlistIds.length !== 1 ? 's' : ''}</p>
                   <div className="table-wrap">
                     <table>
-                      <thead><tr><th>Date</th><th>Employee</th><th>From</th><th>✨</th><th>Reason</th><th>Status</th></tr></thead>
+                      <thead><tr><th>Date</th><th>Employee</th><th>From</th><th>✨</th><th>Reason</th>{settings.vesting_period_days > 0 && <th>Status</th>}</tr></thead>
                       <tbody>
                         {watchlistTxns.map(txn => (
                           <tr key={txn.id}>
@@ -398,7 +402,7 @@ export default function EmployeePage() {
                             <td style={{fontSize:'0.85rem'}}>{txn.from_emp?.first_name} {txn.from_emp?.last_name}</td>
                             <td><span className="spark-badge">✨ {txn.amount}</span></td>
                             <td style={{fontSize:'0.82rem',color:'var(--white-dim)',maxWidth:'180px'}}>{txn.reason || <span style={{opacity:0.35}}>—</span>}</td>
-                            <td><span className={`chip chip-${txn.vested?'green':'gold'}`}>{txn.vested?'Vested':'Pending'}</span></td>
+                            {settings.vesting_period_days > 0 && <td><span className={`chip chip-${txn.vested?'green':'gold'}`}>{txn.vested?'Vested':'Pending'}</span></td>}
                           </tr>
                         ))}
                       </tbody>
@@ -412,12 +416,12 @@ export default function EmployeePage() {
   )
 }
 
-function TxnTable({ rows, mode }) {
+function TxnTable({ rows, mode, showVesting = true }) {
   if (rows.length === 0) return <div className="empty-state"><div className="icon">{mode==='given'?'📤':'📥'}</div><p>No sparks {mode==='given'?'given':'received'} yet</p></div>
   return (
     <div className="table-wrap">
       <table>
-        <thead><tr><th>{mode==='given'?'To':'From'}</th><th>✨</th><th>Reason</th><th>Vests On</th><th>Status</th><th>Date</th></tr></thead>
+        <thead><tr><th>{mode==='given'?'To':'From'}</th><th>✨</th><th>Reason</th>{showVesting && <><th>Vests On</th><th>Status</th></>}<th>Date</th></tr></thead>
         <tbody>
           {rows.map(txn => (
             <tr key={txn.id}>
@@ -428,8 +432,12 @@ function TxnTable({ rows, mode }) {
               </td>
               <td><span className="spark-badge">✨ {txn.amount}</span></td>
               <td style={{fontSize:'0.82rem',color:'var(--white-soft)',maxWidth:'200px'}}>{txn.reason||<span style={{opacity:0.35}}>—</span>}</td>
-              <td style={{fontSize:'0.8rem'}}>{txn.vesting_date||'—'}</td>
-              <td><span className={`chip chip-${txn.vested?'green':'gold'}`}>{txn.vested?'Vested':'Pending'}</span></td>
+              {showVesting && (
+                <>
+                  <td style={{fontSize:'0.8rem'}}>{txn.vesting_date||'—'}</td>
+                  <td><span className={`chip chip-${txn.vested?'green':'gold'}`}>{txn.vested?'Vested':'Pending'}</span></td>
+                </>
+              )}
               <td style={{fontSize:'0.8rem',color:'var(--white-dim)',whiteSpace:'nowrap'}}>{new Date(txn.created_at).toLocaleDateString()}</td>
             </tr>
           ))}

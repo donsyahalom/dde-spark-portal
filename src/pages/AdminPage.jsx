@@ -1057,11 +1057,11 @@ export default function AdminPage() {
                 </select>
               </div>
               <div className="form-group">
-                <label className="form-label">Standard Daily Accrual</label>
+                <label className="form-label">Standard {freqLabel} Limit</label>
                 <input className="form-input" type="number" min="0" max="20" value={settings.daily_spark_allowance||2} onChange={e=>setSettings(s=>({...s,daily_spark_allowance:e.target.value}))} />
               </div>
               <div className="form-group">
-                <label className="form-label">Management Accrual (P1–P4, Owner)</label>
+                <label className="form-label">Management {freqLabel} Limit (P1–P4, Owner)</label>
                 <input className="form-input" type="number" min="0" max="50" value={settings.management_daily_accrual||5} onChange={e=>setSettings(s=>({...s,management_daily_accrual:e.target.value}))} />
               </div>
               <div className="form-group">
