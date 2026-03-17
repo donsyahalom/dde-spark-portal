@@ -102,6 +102,10 @@ export default function EmployeePage() {
   const perPersonRemaining = PER_PERSON_CAP - alreadyGivenToSel
   const maxCanGive = Math.max(0, Math.min(perPersonRemaining, dailyRemaining))
   const totalSparks = (me?.vested_sparks || 0) + (me?.unvested_sparks || 0)
+  const redeemedSparks = me?.redeemed_sparks || 0
+  const availableToRedeem = settings.vesting_period_days > 0
+    ? Math.max(0, (me?.vested_sparks || 0) - redeemedSparks)
+    : Math.max(0, totalSparks - redeemedSparks)
   const freqLabel = getFrequencyLabel(settings.spark_frequency)
   const resetDesc = getFrequencyResetDesc(settings.spark_frequency)
   const periodLabel = getPeriodLabel(settings.spark_frequency)
@@ -197,6 +201,7 @@ export default function EmployeePage() {
       <p className="page-subtitle">Recognize your colleagues with sparks</p>
       <div className="stat-grid">
         <div className="stat-card"><div className="stat-value" style={{color:'var(--gold-light)'}}>{totalSparks}</div><div className="stat-label">Total Sparks</div></div>
+        <div className="stat-card"><div className="stat-value" style={{color:'var(--green-bright)'}}>{availableToRedeem}</div><div className="stat-label">Available to Redeem</div></div>
         {settings.vesting_period_days > 0 && (
           <>
             <div className="stat-card"><div className="stat-value">{me?.vested_sparks || 0}</div><div className="stat-label">Vested</div></div>
