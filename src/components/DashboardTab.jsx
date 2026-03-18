@@ -109,7 +109,7 @@ function ComboChart({ data, showDollar, sparkValue }) {
           fontSize: '0.75rem', minWidth: '140px', textAlign: 'center'
         }}>
           <div style={{ fontWeight: 700, color: 'var(--white-soft)', marginBottom: '4px' }}>{tooltip.label}</div>
-          <div style={{ color: 'var(--gold)' }}>✨ {tooltip.sparks} sparks{tooltip.dollar ? \` (${tooltip.dollar})\` : ''}</div>
+          <div style={{ color: 'var(--gold)' }}>✨ {tooltip.sparks} sparks{tooltip.dollar ? ' (' + tooltip.dollar + ')' : ''}</div>
           <div style={{ color: '#80c4ff' }}>Utilization: {tooltip.util}%</div>
         </div>
       )}
