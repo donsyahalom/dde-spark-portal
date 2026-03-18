@@ -9,7 +9,7 @@ export const REASON_CATEGORIES = [
 ]
 
 export const FREQUENCY_OPTIONS = [
-  { value:'daily',    label:'Daily',     resetDesc:'midnight CT time' },
+  { value:'daily',    label:'Daily',     resetDesc:'midnight CT time on work days (Mon–Fri only)' },
   { value:'weekly',   label:'Weekly',    resetDesc:'midnight CT time on Saturday night' },
   { value:'biweekly', label:'Bi-Weekly', resetDesc:'midnight CT time on alternate Saturday nights' },
   { value:'monthly',  label:'Monthly',   resetDesc:'midnight CT time on the last day of the month' },
