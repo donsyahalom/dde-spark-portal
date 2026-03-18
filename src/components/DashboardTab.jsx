@@ -124,6 +124,7 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
   const [teamMembers, setTeamMembers] = useState([])
   const [settings, setSettings] = useState({})
   const [sparkValue, setSparkValue] = useState('1.00')
+  const [titleOrder, setTitleOrder] = useState([])  // ordered job_title values from custom_lists
 
   // Date range — default: last 30 days
   const defaultFrom = () => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().split('T')[0] }
@@ -148,7 +149,7 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
 
   const fetchAll = async () => {
     setLoading(true)
-    const [{ data: emps }, { data: txns }, { data: teamsData }, { data: membersData }, { data: settingsData }] = await Promise.all([
+    const [{ data: emps }, { data: txns }, { data: teamsData }, { data: membersData }, { data: settingsData }, { data: listsData }] = await Promise.all([
       supabase.from('employees').select('*').eq('is_admin', false),
       supabase.from('spark_transactions')
         .select('*, from_emp:from_employee_id(id,first_name,last_name,job_title,job_grade), to_emp:to_employee_id(id,first_name,last_name,job_title,job_grade)')
@@ -156,9 +157,12 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
         .gte('created_at', dateFrom + 'T00:00:00')
         .lte('created_at', dateTo + 'T23:59:59')
         .order('created_at', { ascending: true }),
-      supabase.from('teams').select('*'),
+      // Fetch teams ordered by admin-defined sort_order
+      supabase.from('teams').select('*').order('sort_order').order('name'),
       supabase.from('team_members').select('*'),
       supabase.from('settings').select('*'),
+      // Fetch job_title order from the Lists admin tab
+      supabase.from('custom_lists').select('value').eq('list_type', 'job_title').order('sort_order'),
     ])
     setEmployees(emps || [])
     setTransactions(txns || [])
@@ -167,6 +171,7 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
     const sObj = {}; (settingsData || []).forEach(s => { sObj[s.key] = s.value })
     setSettings(sObj)
     setSparkValue(sObj.spark_value || '1.00')
+    setTitleOrder((listsData || []).map(r => r.value))
     setLoading(false)
   }
 
@@ -233,28 +238,44 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
   const utilAll = allocatedAll > 0 ? Math.round((sparksGivenAll / allocatedAll) * 100) : 0
   const utilExcl = allocatedExcl > 0 ? Math.round((sparksGivenExcl / allocatedExcl) * 100) : 0
 
-  // By job title
+  // Helper: sort an array of {label, ...} by the admin-defined title order.
+  // Titles not in the list appear at the end in their original relative order.
+  const sortByTitleOrder = (items) => {
+    if (!titleOrder.length) return items
+    return [...items].sort((a, b) => {
+      const ai = titleOrder.indexOf(a.label)
+      const bi = titleOrder.indexOf(b.label)
+      if (ai === -1 && bi === -1) return 0
+      if (ai === -1) return 1
+      if (bi === -1) return -1
+      return ai - bi
+    })
+  }
+
+  // By job title — ordered by admin List order
   const byTitle = useMemo(() => {
     const map = {}
     filteredTxns.forEach(t => {
       const title = t.to_emp?.job_title || 'Unknown'
       map[title] = (map[title] || 0) + (t.amount || 0)
     })
-    return Object.entries(map).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value)
-  }, [filteredTxns])
+    const items = Object.entries(map).map(([label, value]) => ({ label, value }))
+    return sortByTitleOrder(items)
+  }, [filteredTxns, titleOrder])
 
-  // Utilization by job title
+  // Utilization by job title — ordered by admin List order
   const utilByTitle = useMemo(() => {
     const accrMap = {}, givenMap = {}
     empsAll.forEach(e => { const t = e.job_title || 'Unknown'; accrMap[t] = (accrMap[t] || 0) + (e.daily_accrual || 0) * periods })
     filteredTxns.forEach(t => { const title = t.from_emp?.job_title || 'Unknown'; givenMap[title] = (givenMap[title] || 0) + (t.amount || 0) })
-    return Object.keys(accrMap).map(label => ({
+    const items = Object.keys(accrMap).map(label => ({
       label,
       value: accrMap[label] > 0 ? Math.round((givenMap[label] || 0) / accrMap[label] * 100) : 0
-    })).sort((a, b) => b.value - a.value)
-  }, [empsAll, filteredTxns, periods])
+    }))
+    return sortByTitleOrder(items)
+  }, [empsAll, filteredTxns, periods, titleOrder])
 
-  // By team
+  // By team — ordered by admin-defined sort_order (teams already sorted from DB fetch)
   const byTeam = useMemo(() => {
     const visibleTeams = limitToTeamIds ? teams.filter(t => limitToTeamIds.includes(t.id)) : teams
     return visibleTeams.map(team => {
@@ -263,7 +284,8 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
       const allocated = filteredEmps.filter(e => memberIds.has(e.id)).reduce((s, e) => s + (e.daily_accrual || 0) * periods, 0)
       const util = allocated > 0 ? Math.round((given / allocated) * 100) : 0
       return { label: team.name, value: given, allocated, util }
-    }).filter(t => t.allocated > 0 || t.value > 0).sort((a, b) => b.value - a.value)
+    }).filter(t => t.allocated > 0 || t.value > 0)
+    // No sort here — teams array is already in admin-defined order from the DB query
   }, [teams, teamMembers, filteredTxns, filteredEmps, periods, limitToTeamIds])
 
   // Trend over time (group by week or day)

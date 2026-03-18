@@ -71,3 +71,15 @@ END $$;
 --    Optional employees are included in the "Including Optional" calculation
 --    but excluded from the "Excluding Optional" calculation (same as PM4/Owner).
 ALTER TABLE employees ADD COLUMN IF NOT EXISTS is_optional BOOLEAN DEFAULT FALSE;
+
+-- 7. Add sort_order to teams for manual ordering
+ALTER TABLE teams ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 999;
+-- Seed existing teams with sequential order by name
+DO $$
+DECLARE r RECORD; i INT := 1;
+BEGIN
+  FOR r IN SELECT id FROM teams ORDER BY name LOOP
+    UPDATE teams SET sort_order = i WHERE id = r.id;
+    i := i + 1;
+  END LOOP;
+END $$;

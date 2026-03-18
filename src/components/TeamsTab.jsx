@@ -40,7 +40,7 @@ function MultiPicker({ label, options, selected, onChange, accentColor = 'var(--
         type="button"
       >
         <span>{selected.length === 0 ? '-- Select --' : selected.length + ' selected'}</span>
-        <span style={{ opacity: 0.5 }}>{open ? 'v' : '>'}</span>
+        <span style={{ opacity: 0.5 }}>{open ? '▲' : '▼'}</span>
       </button>
       {open && (
         <div style={{
@@ -67,7 +67,7 @@ function MultiPicker({ label, options, selected, onChange, accentColor = 'var(--
   )
 }
 
-// ── Grade/title matchers — dynamic, no hardcoded lists ────────────────────────
+// ── Grade/title matchers ──────────────────────────────────────────────────────
 function isPM(emp) {
   const g = (emp.job_grade || '').toUpperCase()
   const t = (emp.job_title || '').toLowerCase()
@@ -85,6 +85,7 @@ export default function TeamsTab({ employees, showMsg }) {
   const [teamMembers, setTeamMembers] = useState([])
   const [dashboardAccess, setDashboardAccess] = useState([])
   const [loading, setLoading] = useState(false)
+  const [reordering, setReordering] = useState(false)
 
   const emptyTeam = { name: '', pm_ids: [], foreman_ids: [], team_lead_can_view_dashboard: false }
   const [teamForm, setTeamForm] = useState(emptyTeam)
@@ -96,7 +97,7 @@ export default function TeamsTab({ employees, showMsg }) {
 
   const fetchAll = async () => {
     const [{ data: teamsData }, { data: membersData }, { data: accessData }] = await Promise.all([
-      supabase.from('teams').select('*').order('name'),
+      supabase.from('teams').select('*').order('sort_order').order('name'),
       supabase.from('team_members').select('*'),
       supabase.from('dashboard_access').select('*, employee:employee_id(id,first_name,last_name)'),
     ])
@@ -123,6 +124,24 @@ export default function TeamsTab({ employees, showMsg }) {
 
   const empTeamCount = (empId) => teamMembers.filter(m => m.employee_id === empId).length
 
+  // ── Move team up or down by swapping sort_orders with its neighbour ──────────
+  const moveTeam = async (team, direction) => {
+    const idx = teams.findIndex(t => t.id === team.id)
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= teams.length) return
+    const neighbour = teams[swapIdx]
+    setReordering(true)
+    // Swap sort_orders
+    const aOrder = team.sort_order ?? idx + 1
+    const bOrder = neighbour.sort_order ?? swapIdx + 1
+    await Promise.all([
+      supabase.from('teams').update({ sort_order: bOrder }).eq('id', team.id),
+      supabase.from('teams').update({ sort_order: aOrder }).eq('id', neighbour.id),
+    ])
+    setReordering(false)
+    fetchAll()
+  }
+
   const saveTeam = async () => {
     if (!teamForm.name.trim()) { showMsg('error', 'Team name required'); return }
     setLoading(true)
@@ -137,6 +156,9 @@ export default function TeamsTab({ employees, showMsg }) {
       await supabase.from('teams').update(payload).eq('id', editTeamId)
       showMsg('success', 'Team "' + payload.name + '" updated')
     } else {
+      // Assign sort_order at end of current list
+      const maxOrder = teams.reduce((m, t) => Math.max(m, t.sort_order ?? 0), 0)
+      payload.sort_order = maxOrder + 1
       const { error } = await supabase.from('teams').insert(payload)
       if (error) { showMsg('error', error.message); setLoading(false); return }
       showMsg('success', 'Team "' + payload.name + '" created')
@@ -267,7 +289,7 @@ export default function TeamsTab({ employees, showMsg }) {
         <div className="card" style={{ textAlign: 'center', color: 'var(--white-dim)', padding: '32px' }}>No teams yet. Create one above.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
-          {teams.map(team => {
+          {teams.map((team, idx) => {
             const memberIds = new Set(teamMembers.filter(m => m.team_id === team.id).map(m => m.employee_id))
             const members = nonAdminEmps.filter(e => memberIds.has(e.id))
             const isSelected = selectedTeamId === team.id
@@ -276,13 +298,30 @@ export default function TeamsTab({ employees, showMsg }) {
             return (
               <div key={team.id} className="card" style={{ border: isSelected ? '1px solid var(--gold)' : undefined }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--gold)' }}>{team.name}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--white-dim)', marginTop: '3px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                      {pmName && <span>PM: <strong style={{ color: 'var(--white-soft)' }}>{pmName}</strong></span>}
-                      {foremanName && <span>Foreman: <strong style={{ color: 'var(--white-soft)' }}>{foremanName}</strong></span>}
-                      <span>{members.length} member{members.length !== 1 ? 's' : ''}</span>
-                      {team.team_lead_can_view_dashboard && <span style={{ color: 'var(--green-bright)' }}>&#x1F4CA; Leads can view dashboard</span>}
+                  {/* ── Move buttons + name ── */}
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', flexShrink: 0, paddingTop: '2px' }}>
+                      <button
+                        onClick={() => moveTeam(team, 'up')}
+                        disabled={idx === 0 || reordering}
+                        title="Move up"
+                        style={{ background: 'none', border: 'none', cursor: idx === 0 ? 'default' : 'pointer', color: idx === 0 ? 'rgba(255,255,255,0.15)' : 'var(--white-dim)', fontSize: '0.7rem', padding: '0 3px', lineHeight: 1.2 }}
+                      >▲</button>
+                      <button
+                        onClick={() => moveTeam(team, 'down')}
+                        disabled={idx === teams.length - 1 || reordering}
+                        title="Move down"
+                        style={{ background: 'none', border: 'none', cursor: idx === teams.length - 1 ? 'default' : 'pointer', color: idx === teams.length - 1 ? 'rgba(255,255,255,0.15)' : 'var(--white-dim)', fontSize: '0.7rem', padding: '0 3px', lineHeight: 1.2 }}
+                      >▼</button>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--gold)' }}>{team.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--white-dim)', marginTop: '3px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                        {pmName && <span>PM: <strong style={{ color: 'var(--white-soft)' }}>{pmName}</strong></span>}
+                        {foremanName && <span>Foreman: <strong style={{ color: 'var(--white-soft)' }}>{foremanName}</strong></span>}
+                        <span>{members.length} member{members.length !== 1 ? 's' : ''}</span>
+                        {team.team_lead_can_view_dashboard && <span style={{ color: 'var(--green-bright)' }}>&#x1F4CA; Leads can view dashboard</span>}
+                      </div>
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -293,6 +332,7 @@ export default function TeamsTab({ employees, showMsg }) {
                     <button className="btn btn-danger btn-xs" onClick={() => deleteTeam(team)}>x</button>
                   </div>
                 </div>
+
                 {members.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: isSelected ? '12px' : 0 }}>
                     {members.map(e => (
@@ -303,6 +343,7 @@ export default function TeamsTab({ employees, showMsg }) {
                     ))}
                   </div>
                 )}
+
                 {isSelected && (
                   <div style={{ borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
                     <div style={{ fontFamily: 'var(--font-display)', fontSize: '0.7rem', color: 'var(--gold)', letterSpacing: '0.08em', marginBottom: '8px' }}>ASSIGN / REMOVE MEMBERS</div>
@@ -337,8 +378,8 @@ export default function TeamsTab({ employees, showMsg }) {
         <div className="card-title"><span className="icon">&#x1F4CA;</span> Dashboard Access</div>
         <p style={{ color: 'var(--white-dim)', fontSize: '0.82rem', marginBottom: '14px' }}>
           Grant non-admin employees access to the analytics dashboard.{' '}
-          <strong style={{ color: 'var(--gold)' }}>Full Dashboard</strong> includes $ amounts and the including/excluding PM4 breakdown.{' '}
-          <strong style={{ color: 'var(--green-bright)' }}>Team Dashboard</strong> shows only their teams' spark counts — no $ amounts and no PM4 split label.
+          <strong style={{ color: 'var(--gold)' }}>Full Dashboard</strong> includes $ amounts and the including/excluding optional breakdown.{' '}
+          <strong style={{ color: 'var(--green-bright)' }}>Team Dashboard</strong> shows only their teams' spark counts — no $ amounts.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {nonAdminEmps.map(e => {
