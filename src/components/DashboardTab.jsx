@@ -2,11 +2,10 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-const PM4_OWNER_TITLES = ['Project Manager', 'Owner']
-const PM4_OWNER_GRADES = ['P1', 'P2', 'P3', 'P4', 'Owner']
-
+// Exclusion is determined solely by the is_optional flag on the employee record.
+// Job grade and title are not considered here.
 function isExcluded(emp) {
-  return PM4_OWNER_GRADES.includes(emp.job_grade) || PM4_OWNER_TITLES.includes(emp.job_title) || emp.is_optional === true
+  return emp.is_optional === true
 }
 
 function fmt$(n, sparkValue) {
