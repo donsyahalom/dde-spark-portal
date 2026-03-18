@@ -11,100 +11,118 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-// ── Combined Bar + Line chart (sparks count bar, utilization % line, dual axis) ──
-function ComboChart({ data, showDollar, sparkValue, height = 200 }) {
+// ── Combined Bar + Line chart ─────────────────────────────────────────────────
+// Bars = spark count (gold), Line = utilization % (blue), dual axis, no scroll.
+// Labels stagger: bar count sits inside/top of bar; % label sits on the line dot.
+// Hover tooltip shows full values.
+function ComboChart({ data, showDollar, sparkValue }) {
+  const [tooltip, setTooltip] = useState(null) // { x, y, label, sparks, util }
   if (!data || data.length === 0) return (
     <div style={{ color: 'var(--white-dim)', fontSize: '0.8rem', textAlign: 'center', padding: '20px' }}>No data</div>
   )
+
+  // Fixed viewBox: chart always fills container width, no horizontal scroll
+  const VW = 500, BAR_AREA_H = 160, X_LABEL_H = 28, UTIL_LABEL_H = 18, TOP_PAD = 8
+  const TOTAL_H = TOP_PAD + UTIL_LABEL_H + BAR_AREA_H + X_LABEL_H
+  const n = data.length
+  const slotW = VW / n
+  const barW = Math.max(8, Math.min(48, slotW * 0.55))
   const maxBar = Math.max(...data.map(d => d.sparks), 1)
-  const barW = Math.max(28, Math.min(72, Math.floor(560 / data.length) - 10))
-  const chartH = height - 50  // reserve bottom for labels
+
+  // Bar Y within BAR_AREA (top = TOP_PAD + UTIL_LABEL_H, bottom = TOP_PAD + UTIL_LABEL_H + BAR_AREA_H)
+  const barTop = TOP_PAD + UTIL_LABEL_H
+  const barBot = barTop + BAR_AREA_H
+
+  // Util line maps 0–100% onto BAR_AREA (so it overlays the bars)
+  const utilY = (pct) => barBot - (Math.min(pct, 110) / 100) * BAR_AREA_H
+
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <div style={{ position: 'relative', minWidth: data.length * (barW + 10) + 60 }}>
-        {/* Y-axis right label */}
-        <div style={{ position: 'absolute', right: 0, top: 0, fontSize: '0.58rem', color: '#80c4ff', opacity: 0.7 }}>% util</div>
-        <div style={{ position: 'absolute', left: 0, top: 0, fontSize: '0.58rem', color: 'var(--gold)', opacity: 0.7 }}>sparks</div>
+    <div style={{ position: 'relative' }}>
+      <svg viewBox={`0 0 ${VW} ${TOTAL_H}`} style={{ width: '100%', display: 'block' }}>
+        {/* Grid lines at 25/50/75/100% mapped onto bar area */}
+        {[25, 50, 75, 100].map(pct => {
+          const y = utilY(pct)
+          return (
+            <g key={pct}>
+              <line x1={0} y1={y} x2={VW} y2={y} stroke="rgba(255,255,255,0.06)" strokeWidth={1} strokeDasharray="3,4" />
+              <text x={VW - 2} y={y - 2} textAnchor="end" fill="rgba(128,196,255,0.4)" fontSize={7}>{pct}%</text>
+            </g>
+          )
+        })}
 
-        <svg width="100%" height={height} style={{ display: 'block', overflow: 'visible' }}
-          viewBox={`0 0 ${data.length * (barW + 10) + 20} ${height}`}>
+        {data.map((d, i) => {
+          const cx = (i + 0.5) * slotW
+          const barH = Math.max(4, Math.round((d.sparks / maxBar) * BAR_AREA_H))
+          const barY = barBot - barH
+          const barX = cx - barW / 2
+          const labelVal = showDollar ? fmt$(d.sparks, sparkValue) : String(d.sparks)
+          // Bar label: inside bar if tall enough, otherwise just above
+          const insideBar = barH > 22
+          const barLabelY = insideBar ? barY + 13 : barY - 3
 
-          {/* Horizontal grid lines at 25%, 50%, 75%, 100% utilization */}
-          {[25, 50, 75, 100].map(pct => {
-            const y = chartH - (pct / 100) * chartH
-            return (
-              <g key={pct}>
-                <line x1={10} y1={y} x2={data.length * (barW + 10) + 10} y2={y}
-                  stroke="rgba(255,255,255,0.06)" strokeWidth={1} strokeDasharray="3,4" />
-                <text x={data.length * (barW + 10) + 14} y={y + 4}
-                  fill="rgba(128,196,255,0.5)" fontSize={8}>{pct}%</text>
-              </g>
-            )
-          })}
-
-          {/* Bars */}
-          {data.map((d, i) => {
-            const x = 10 + i * (barW + 10)
-            const barH = Math.max(3, Math.round((d.sparks / maxBar) * chartH))
-            const barY = chartH - barH
-            const labelVal = showDollar ? fmt$(d.sparks, sparkValue) : d.sparks
-            return (
-              <g key={i}>
-                <rect x={x} y={barY} width={barW} height={barH}
-                  fill="var(--gold)" opacity={0.8} rx={3} />
-                {/* Spark count label above bar */}
-                <text x={x + barW / 2} y={barY - 3} textAnchor="middle"
-                  fill="var(--gold)" fontSize={9} fontWeight={700}>{labelVal}</text>
-              </g>
-            )
-          })}
-
-          {/* Utilization line */}
-          {data.length >= 2 && (() => {
-            const pts = data.map((d, i) => {
-              const x = 10 + i * (barW + 10) + barW / 2
-              const y = chartH - (Math.min(d.util, 100) / 100) * chartH
-              return { x, y, util: d.util }
-            })
-            const polyPts = pts.map(p => `${p.x},${p.y}`).join(' ')
-            return (
-              <g>
-                <polyline points={polyPts} fill="none" stroke="#80c4ff" strokeWidth={2} strokeLinejoin="round" />
-                {pts.map((p, i) => (
-                  <g key={i}>
-                    <circle cx={p.x} cy={p.y} r={4} fill="#80c4ff" />
-                    {/* % label above dot */}
-                    <text x={p.x} y={p.y - 7} textAnchor="middle"
-                      fill="#80c4ff" fontSize={8} fontWeight={700}>{p.util}%</text>
-                  </g>
-                ))}
-              </g>
-            )
-          })()}
-
-          {/* X-axis labels */}
-          {data.map((d, i) => {
-            const x = 10 + i * (barW + 10) + barW / 2
-            return (
-              <text key={i} x={x} y={chartH + 14} textAnchor="middle"
-                fill="rgba(255,255,255,0.5)" fontSize={9}
-                style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {d.label.length > 10 ? d.label.slice(0, 10) + '…' : d.label}
+          return (
+            <g key={i}
+              onMouseEnter={e => setTooltip({ svgX: cx, svgY: barY, label: d.label, sparks: d.sparks, util: d.util, dollar: showDollar ? fmt$(d.sparks, sparkValue) : null })}
+              onMouseLeave={() => setTooltip(null)}
+              style={{ cursor: 'default' }}>
+              {/* Bar */}
+              <rect x={barX} y={barY} width={barW} height={barH}
+                fill="var(--gold)" opacity={0.82} rx={2} />
+              {/* Spark count label — gold, on/in bar */}
+              <text x={cx} y={barLabelY} textAnchor="middle"
+                fill={insideBar ? 'rgba(0,0,0,0.75)' : 'var(--gold)'} fontSize={8} fontWeight={700}>{labelVal}</text>
+              {/* X-axis label */}
+              <text x={cx} y={barBot + X_LABEL_H - 4} textAnchor="middle"
+                fill="rgba(255,255,255,0.45)" fontSize={8}>
+                {d.label.length > 12 ? d.label.slice(0, 12) + '…' : d.label}
               </text>
-            )
-          })}
-        </svg>
+            </g>
+          )
+        })}
 
-        {/* Legend */}
-        <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', marginTop: '4px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', color: 'var(--gold)' }}>
-            <div style={{ width: 12, height: 12, background: 'var(--gold)', borderRadius: 2, opacity: 0.8 }} />
-            Sparks Received
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', color: '#80c4ff' }}>
-            <div style={{ width: 20, height: 2, background: '#80c4ff', borderRadius: 1 }} />
-            Utilization %
-          </div>
+        {/* Utilization line + dots + % labels (staggered above dots, above bar area) */}
+        {n >= 1 && (() => {
+          const pts = data.map((d, i) => ({ x: (i + 0.5) * slotW, y: utilY(d.util), util: d.util }))
+          const polyPts = pts.map(p => `${p.x},${p.y}`).join(' ')
+          return (
+            <g>
+              {n >= 2 && <polyline points={polyPts} fill="none" stroke="#80c4ff" strokeWidth={1.5} strokeLinejoin="round" />}
+              {pts.map((p, i) => (
+                <g key={i}>
+                  <circle cx={p.x} cy={p.y} r={3.5} fill="#80c4ff" />
+                  {/* % label — sits at TOP_PAD + 2 above the util line dot, blue, never overlaps bar label */}
+                  <text x={p.x} y={TOP_PAD + UTIL_LABEL_H - 3} textAnchor="middle"
+                    fill="#80c4ff" fontSize={8} fontWeight={700}>{p.util}%</text>
+                </g>
+              ))}
+            </g>
+          )
+        })()}
+      </svg>
+
+      {/* Hover tooltip */}
+      {tooltip && (
+        <div style={{
+          position: 'absolute', top: '8px', left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(17,46,28,0.97)', border: '1px solid var(--border)',
+          borderRadius: '8px', padding: '8px 12px', pointerEvents: 'none', zIndex: 20,
+          fontSize: '0.75rem', minWidth: '140px', textAlign: 'center'
+        }}>
+          <div style={{ fontWeight: 700, color: 'var(--white-soft)', marginBottom: '4px' }}>{tooltip.label}</div>
+          <div style={{ color: 'var(--gold)' }}>✨ {tooltip.sparks} sparks{tooltip.dollar ? \` (${tooltip.dollar})\` : ''}</div>
+          <div style={{ color: '#80c4ff' }}>Utilization: {tooltip.util}%</div>
+        </div>
+      )}
+
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', marginTop: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', color: 'var(--gold)' }}>
+          <div style={{ width: 12, height: 10, background: 'var(--gold)', borderRadius: 2, opacity: 0.82 }} />
+          Sparks Received
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '0.68rem', color: '#80c4ff' }}>
+          <div style={{ width: 18, height: 2, background: '#80c4ff', borderRadius: 1 }} />
+          Utilization %
         </div>
       </div>
     </div>
@@ -498,39 +516,59 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
       </div>
 
       {/* ── Annualized Budget + Company Utilization (top) ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: showDollar ? '1fr 1fr' : '1fr', gap: '16px', marginBottom: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: showDollar ? '1fr 1fr' : '1fr', gap: '16px', marginBottom: '16px', alignItems: 'start' }}>
         <div className="card">
           <SectionHeader icon="📈" title="ANNUALIZED SPARK BUDGET"
             sub={showDollar ? `${freq} accrual × ${periodsPerYear} periods/yr · $${sv}/spark` : `${freq} accrual × ${periodsPerYear} periods/yr`} />
-          <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(130px,1fr))' }}>
-            {showDollar && <StatCard label="Annual Sparks (Incl Optional)" value={annualizedAll.toLocaleString()} color="var(--gold)" />}
-            {showDollar && <StatCard label="Annual $ (Incl Optional)" value={`$${(annualizedAll * sv).toLocaleString('en-US', { maximumFractionDigits: 0 })}`} color="var(--gold)" />}
-            <StatCard label={showDollar ? "Annual Sparks (Excl Optional)" : "Annual Sparks"} value={annualizedExcl.toLocaleString()} color="var(--green-bright)" />
-            {showDollar && <StatCard label="Annual $ (Excl Optional)" value={`$${(annualizedExcl * sv).toLocaleString('en-US', { maximumFractionDigits: 0 })}`} color="var(--green-bright)" />}
-          </div>
+          {showDollar ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {/* Row 1: Including Optional — sparks + $ side by side */}
+              <div>
+                <div style={{ fontSize: '0.62rem', color: 'var(--gold)', fontFamily: 'var(--font-display)', letterSpacing: '0.07em', marginBottom: '6px' }}>INCLUDING OPTIONAL</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <StatCard label="Annual Sparks" value={annualizedAll.toLocaleString()} color="var(--gold)" />
+                  <StatCard label="Annual $" value={`$${(annualizedAll * sv).toLocaleString('en-US', { maximumFractionDigits: 0 })}`} color="var(--gold)" />
+                </div>
+              </div>
+              {/* Row 2: Excluding Optional — sparks + $ side by side */}
+              <div>
+                <div style={{ fontSize: '0.62rem', color: 'var(--green-bright)', fontFamily: 'var(--font-display)', letterSpacing: '0.07em', marginBottom: '6px' }}>EXCLUDING OPTIONAL</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <StatCard label="Annual Sparks" value={annualizedExcl.toLocaleString()} color="var(--green-bright)" />
+                  <StatCard label="Annual $" value={`$${(annualizedExcl * sv).toLocaleString('en-US', { maximumFractionDigits: 0 })}`} color="var(--green-bright)" />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(130px,1fr))' }}>
+              <StatCard label="Annual Sparks" value={annualizedExcl.toLocaleString()} color="var(--green-bright)" />
+            </div>
+          )}
         </div>
 
         {showDollar && (
           <div className="card">
             <SectionHeader icon="🏢" title="COMPANY-WIDE UTILIZATION" sub="Period spark usage vs allocation" />
-            <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
-              <UtilGauge used={sparksGivenAll} total={allocatedAll} label={`Incl Optional · ${utilAll}%`} color="var(--gold)" />
-              <UtilGauge used={sparksGivenExcl} total={allocatedExcl} label={`Excl Optional · ${utilExcl}%`} color="var(--green-bright)" />
-              <div style={{ flex: 1, minWidth: '140px' }}>
-                <div style={{ marginBottom: '8px' }}>
-                  <div style={{ fontSize: '0.68rem', color: 'var(--white-dim)', marginBottom: '2px' }}>$ Spend (Incl Optional)</div>
+            {/* Two rows aligned: gauge + $ spend. Row 1 = Incl, Row 2 = Excl */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {/* Row 1: Including Optional */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <UtilGauge used={sparksGivenAll} total={allocatedAll} label={`Incl Optional · ${utilAll}%`} color="var(--gold)" />
+                <div>
+                  <div style={{ fontSize: '0.65rem', color: 'var(--white-dim)', marginBottom: '2px' }}>$ Spend (Incl Optional)</div>
                   <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--gold)' }}>{fmt$(sparksGivenAll, sparkValue)}</div>
                 </div>
+              </div>
+              {/* Row 2: Excluding Optional */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <UtilGauge used={sparksGivenExcl} total={allocatedExcl} label={`Excl Optional · ${utilExcl}%`} color="var(--green-bright)" />
                 <div>
-                  <div style={{ fontSize: '0.68rem', color: 'var(--white-dim)', marginBottom: '2px' }}>$ Spend (Excl Optional)</div>
+                  <div style={{ fontSize: '0.65rem', color: 'var(--white-dim)', marginBottom: '2px' }}>$ Spend (Excl Optional)</div>
                   <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--green-bright)' }}>{fmt$(sparksGivenExcl, sparkValue)}</div>
                 </div>
               </div>
             </div>
           </div>
-        )}
-        {!showDollar && (
-          <div className="card" style={{ display: 'none' /* single column: hide */ }} />
         )}
       </div>
 
@@ -585,7 +623,7 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
         {byTeamCombo.length > 0 && (
           <div style={{ borderTop: '1px solid var(--border)', marginTop: '16px', paddingTop: '14px' }}>
             <div style={{ fontSize: '0.68rem', color: 'var(--white-dim)', fontFamily: 'var(--font-display)', letterSpacing: '0.07em', marginBottom: '10px' }}>TEAM UTILIZATION</div>
-            <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', justifyContent: 'center' }}>
               {byTeamCombo.map(t => (
                 <UtilGauge key={t.label} used={t.sparks} total={t.allocated} label={t.label} color="#80c4ff" />
               ))}
@@ -608,22 +646,21 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
         />
       </div>
 
-      {/* ── Combined Charts by Title and Team ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(360px,1fr))', gap: '16px', marginBottom: '16px' }}>
-        <div className="card">
-          <SectionHeader icon="🧑‍🔧" title="SPARKS RECEIVED + UTILIZATION BY TITLE"
-            sub="Bars = spark count · Line = utilization %" />
-          <ComboChart data={byTitleCombo} showDollar={showDollar} sparkValue={sparkValue} />
-        </div>
-
-        {byTeamCombo.length > 0 && (
-          <div className="card">
-            <SectionHeader icon="👷" title="SPARKS RECEIVED + UTILIZATION BY TEAM"
-              sub="Bars = spark count · Line = utilization %" />
-            <ComboChart data={byTeamCombo} showDollar={showDollar} sparkValue={sparkValue} />
-          </div>
-        )}
+      {/* ── Combined Charts by Title — full width row ── */}
+      <div className="card" style={{ marginBottom: '16px' }}>
+        <SectionHeader icon="🧑‍🔧" title="SPARKS RECEIVED + UTILIZATION BY TITLE"
+          sub="Bars = spark count  ·  Line = utilization %  ·  Hover for details" />
+        <ComboChart data={byTitleCombo} showDollar={showDollar} sparkValue={sparkValue} />
       </div>
+
+      {/* ── Combined Charts by Team — full width row ── */}
+      {byTeamCombo.length > 0 && (
+        <div className="card" style={{ marginBottom: '16px' }}>
+          <SectionHeader icon="👷" title="SPARKS RECEIVED + UTILIZATION BY TEAM"
+            sub="Bars = spark count  ·  Line = utilization %  ·  Hover for details" />
+          <ComboChart data={byTeamCombo} showDollar={showDollar} sparkValue={sparkValue} />
+        </div>
+      )}
 
       {/* ── Top 10 Givers / Receivers ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
