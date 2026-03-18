@@ -87,12 +87,28 @@ CREATE INDEX IF NOT EXISTS idx_daily_given_from ON daily_given(from_employee_id,
 
 -- Reset function using Connecticut (America/New_York) timezone.
 -- daily_sparks_remaining is seeded from each employee's daily_accrual value.
+-- When frequency is 'daily', resets only occur on work days (Mon–Fri).
 CREATE OR REPLACE FUNCTION reset_daily_sparks()
 RETURNS void AS $$
 DECLARE
   ct_today DATE;
+  freq TEXT;
+  dow INT;
 BEGIN
   ct_today := (NOW() AT TIME ZONE 'America/New_York')::DATE;
+
+  -- Read the spark_frequency setting (defaults to 'daily')
+  SELECT value INTO freq FROM settings WHERE key = 'spark_frequency';
+  freq := COALESCE(freq, 'daily');
+
+  -- When frequency is daily, skip weekends (dow: 0=Sunday, 6=Saturday)
+  IF freq = 'daily' THEN
+    dow := EXTRACT(DOW FROM ct_today);
+    IF dow = 0 OR dow = 6 THEN
+      RETURN; -- Weekend: do not reset
+    END IF;
+  END IF;
+
   UPDATE employees
   SET daily_sparks_remaining = daily_accrual,
       last_daily_reset = ct_today

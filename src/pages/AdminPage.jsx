@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { MANAGEMENT_GRADES, FREQUENCY_OPTIONS, CARRIERS, LEADERBOARD_RANGE_OPTIONS, getFrequencyLabel } from '../lib/constants'
 import { sendTestNotification, isBeforeGoLive } from '../lib/notificationService'
+import DashboardTab from '../components/DashboardTab'
+import TeamsTab from '../components/TeamsTab'
 
 // ── Hardcoded fallback lists (used only if DB is empty) ───────────────────────
 const DEFAULT_GRADES = ['Pre1','A1','A2','A3','A4','J1','J2','J3','J4','F1','F2','F3','F4','P1','P2','P3','P4','Owner']
@@ -97,7 +99,7 @@ const REMINDER_PRESETS = [24, 48, 72, 12, 6, 3, 1]
 // ─────────────────────────────────────────────────────────────────────────────
 export default function AdminPage() {
   const { currentUser } = useAuth()
-  const [tab, setTab] = useState('employees')
+  const [tab, setTab] = useState('dashboard')
   const [employees, setEmployees] = useState([])
   const [settings, setSettings] = useState({})
   const [sortMode, setSortMode] = useState('name')
@@ -144,6 +146,23 @@ export default function AdminPage() {
   const [reminderOffsets, setReminderOffsets] = useState(['48','24',''])
   const [reminderWarning, setReminderWarning] = useState(null)
 
+  // ── Teams state ─────────────────────────────────────────────────────────────
+  const [teams, setTeams] = useState([])
+  const [teamMembers, setTeamMembers] = useState([])
+  const emptyTeamForm = { name: '', pm_id: '', foreman_id: '', team_lead_can_view_dashboard: false }
+  const [teamForm, setTeamForm] = useState(emptyTeamForm)
+  const [editTeam, setEditTeam] = useState(null)
+  const [editTeamValues, setEditTeamValues] = useState({})
+  const [editTeamMemberIds, setEditTeamMemberIds] = useState([])
+  const [newTeamMemberIds, setNewTeamMemberIds] = useState([])
+  const [teamSaving, setTeamSaving] = useState(false)
+
+  // ── Dashboard access state ───────────────────────────────────────────────────
+  const [dashboardAccess, setDashboardAccess] = useState([]) // [{employee_id, access_level}]
+  const [dashAccessEmpId, setDashAccessEmpId] = useState('')
+  const [dashAccessLevel, setDashAccessLevel] = useState('team')
+  const [dashAccessSaving, setDashAccessSaving] = useState(false)
+
   // Reports
   const [reportFrom, setReportFrom] = useState(()=>{const d=new Date();d.setDate(d.getDate()-30);return d.toISOString().split('T')[0]})
   const [reportTo, setReportTo] = useState(new Date().toISOString().split('T')[0])
@@ -156,9 +175,12 @@ export default function AdminPage() {
   useEffect(() => { fetchAll() }, [])
 
   const fetchAll = async () => {
-    const [{ data: emps }, { data: sData }] = await Promise.all([
+    const [{ data: emps }, { data: sData }, { data: teamsData }, { data: membersData }, { data: dashData }] = await Promise.all([
       supabase.from('employees').select('*').eq('is_admin', false).order('last_name'),
-      supabase.from('settings').select('*')
+      supabase.from('settings').select('*'),
+      supabase.from('teams').select('*, pm:pm_id(id,first_name,last_name), foreman:foreman_id(id,first_name,last_name)').order('name'),
+      supabase.from('team_members').select('*'),
+      supabase.from('dashboard_access').select('*, employee:employee_id(id,first_name,last_name)'),
     ])
     if (emps) setEmployees(emps)
     if (sData) {
@@ -167,6 +189,9 @@ export default function AdminPage() {
       while (parts.length < 3) parts.push('')
       setReminderOffsets(parts.slice(0,3))
     }
+    if (teamsData) setTeams(teamsData)
+    if (membersData) setTeamMembers(membersData)
+    if (dashData) setDashboardAccess(dashData)
     await fetchLists()
     const before = await isBeforeGoLive()
     setBeforeGoLive(before)
@@ -649,6 +674,75 @@ export default function AdminPage() {
 
   const freqLabel = getFrequencyLabel(settings.spark_frequency || 'daily')
 
+  // ── Teams helpers ────────────────────────────────────────────────────────────
+  const saveTeam = async () => {
+    if (!teamForm.name.trim()) { showMsg('error', 'Team name required'); return }
+    setTeamSaving(true)
+    const { data: team, error } = await supabase.from('teams').insert({
+      name: teamForm.name.trim(),
+      pm_id: teamForm.pm_id || null,
+      foreman_id: teamForm.foreman_id || null,
+      team_lead_can_view_dashboard: teamForm.team_lead_can_view_dashboard,
+    }).select().single()
+    if (error) { showMsg('error', error.message); setTeamSaving(false); return }
+    // Add members
+    if (newTeamMemberIds.length > 0) {
+      await supabase.from('team_members').insert(newTeamMemberIds.map(eid => ({ team_id: team.id, employee_id: eid })))
+    }
+    setTeamForm(emptyTeamForm); setNewTeamMemberIds([])
+    setTeamSaving(false); showMsg('success', `Team "${team.name}" created`); fetchAll()
+  }
+
+  const openEditTeam = (team) => {
+    setEditTeam(team)
+    setEditTeamValues({ name: team.name, pm_id: team.pm_id || '', foreman_id: team.foreman_id || '', team_lead_can_view_dashboard: team.team_lead_can_view_dashboard || false })
+    const memberIds = teamMembers.filter(m => m.team_id === team.id).map(m => m.employee_id)
+    setEditTeamMemberIds(memberIds)
+  }
+
+  const saveEditTeam = async () => {
+    if (!editTeamValues.name.trim()) { showMsg('error', 'Team name required'); return }
+    setTeamSaving(true)
+    await supabase.from('teams').update({
+      name: editTeamValues.name.trim(),
+      pm_id: editTeamValues.pm_id || null,
+      foreman_id: editTeamValues.foreman_id || null,
+      team_lead_can_view_dashboard: editTeamValues.team_lead_can_view_dashboard,
+      updated_at: new Date().toISOString(),
+    }).eq('id', editTeam.id)
+    // Sync members: delete all then re-insert
+    await supabase.from('team_members').delete().eq('team_id', editTeam.id)
+    if (editTeamMemberIds.length > 0) {
+      await supabase.from('team_members').insert(editTeamMemberIds.map(eid => ({ team_id: editTeam.id, employee_id: eid })))
+    }
+    setEditTeam(null); setTeamSaving(false); showMsg('success', 'Team updated'); fetchAll()
+  }
+
+  const deleteTeam = async (team) => {
+    if (!window.confirm(`Delete team "${team.name}"? Members won't be deleted.`)) return
+    await supabase.from('teams').delete().eq('id', team.id)
+    showMsg('success', `Team "${team.name}" deleted`); fetchAll()
+  }
+
+  // Warn if employee is on multiple teams
+  const getTeamCountForEmp = (empId) => teamMembers.filter(m => m.employee_id === empId).length
+
+  // ── Dashboard access helpers ─────────────────────────────────────────────────
+  const grantDashboardAccess = async () => {
+    if (!dashAccessEmpId) { showMsg('error', 'Select an employee'); return }
+    setDashAccessSaving(true)
+    await supabase.from('dashboard_access').upsert({
+      employee_id: dashAccessEmpId, access_level: dashAccessLevel, granted_by: currentUser.id
+    }, { onConflict: 'employee_id' })
+    setDashAccessEmpId(''); setDashAccessSaving(false)
+    showMsg('success', 'Dashboard access granted'); fetchAll()
+  }
+
+  const revokeDashboardAccess = async (empId) => {
+    await supabase.from('dashboard_access').delete().eq('employee_id', empId)
+    showMsg('success', 'Dashboard access revoked'); fetchAll()
+  }
+
   // ── RENDER ─────────────────────────────────────────────────────────────────
   return (
     <div className="fade-in">
@@ -663,10 +757,20 @@ export default function AdminPage() {
       )}
 
       <div className="tabs">
-        {[['employees','👥 Employees'],['add','➕ Add'],['batch','📋 Batch'],['settings','⚙️ Settings'],['lists','📝 Lists'],['reports','📊 Reports']].map(([t,label]) => (
+        {[['dashboard','📊 Dashboard'],['employees','👥 Employees'],['add','➕ Add'],['batch','📋 Batch'],['teams','👷 Teams'],['settings','⚙️ Settings'],['lists','📝 Lists'],['reports','📊 Reports']].map(([t,label]) => (
           <button key={t} className={`tab-btn${tab===t?' active':''}`} onClick={() => setTab(t)}>{label}</button>
         ))}
       </div>
+
+      {/* ── DASHBOARD TAB ── */}
+      {tab==='dashboard'&&(
+        <DashboardTab showDollar={true} limitToTeamIds={null} />
+      )}
+
+      {/* ── TEAMS TAB ── */}
+      {tab==='teams'&&(
+        <TeamsTab employees={employees} showMsg={showMsg} />
+      )}
 
       {/* ── EMPLOYEES TAB ── */}
       {tab==='employees'&&(
@@ -1075,6 +1179,11 @@ export default function AdminPage() {
                   <input className="form-input" type="date" value={settings.biweekly_reference_date||''} onChange={e=>setSettings(s=>({...s,biweekly_reference_date:e.target.value}))} />
                 </div>
               )}
+              <div className="form-group">
+                <label className="form-label">💵 Spark Value ($ per spark)</label>
+                <input className="form-input" type="number" min="0.01" step="0.01" value={settings.spark_value||'1.00'} onChange={e=>setSettings(s=>({...s,spark_value:e.target.value}))} />
+                <div style={{fontSize:'0.7rem',color:'var(--white-dim)',marginTop:'4px'}}>Controls $ calculations on the Dashboard. Only admins and authorized dashboard users see $ amounts.</div>
+              </div>
             </div>
             <button className="btn btn-gold btn-sm" onClick={saveSettings} disabled={loading}>{loading?'Saving...':'💾 Save Settings'}</button>
           </div>

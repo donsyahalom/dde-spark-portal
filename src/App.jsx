@@ -6,6 +6,7 @@ import EmployeePage from './pages/EmployeePage'
 import AdminPage from './pages/AdminPage'
 import ChangePasswordPage from './pages/ChangePasswordPage'
 import MessageBoardPage from './pages/MessageBoardPage'
+import DashboardPage from './pages/DashboardPage'
 import Layout from './components/Layout'
 import './styles.css'
 
@@ -31,6 +32,7 @@ function AppRoutes() {
         <Route path="leaderboard" element={<LeaderboardPage />} />
         <Route path="my-sparks" element={<EmployeePage />} />
         <Route path="board" element={<MessageBoardPage />} />
+        <Route path="dashboard" element={<DashboardPage />} />
         <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/leaderboard" />} />

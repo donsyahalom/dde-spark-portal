@@ -1,10 +1,25 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useState, useEffect } from 'react'
+import { supabase } from '../lib/supabase'
 
 export default function Layout() {
   const { currentUser, logout } = useAuth()
   const navigate = useNavigate()
+  const [hasDashboardAccess, setHasDashboardAccess] = useState(false)
+
+  useEffect(() => {
+    if (!currentUser || currentUser.is_admin) return
+    supabase
+      .from('dashboard_access')
+      .select('access_level')
+      .eq('employee_id', currentUser.id)
+      .single()
+      .then(({ data }) => setHasDashboardAccess(!!data))
+  }, [currentUser])
+
   const handleLogout = () => { logout(); navigate('/login') }
+
   return (
     <div className="app-layout">
       <header className="header">
@@ -18,8 +33,12 @@ export default function Layout() {
             <NavLink to="/my-sparks" className={({isActive})=>`nav-btn${isActive?' active':''}`}>✨ My Sparks</NavLink>
           )}
           <NavLink to="/board" className={({isActive})=>`nav-btn${isActive?' active':''}`}>📢 Company</NavLink>
+          {/* Dashboard link: admins go to /admin, granted users go to /dashboard */}
           {currentUser?.is_admin && (
             <NavLink to="/admin" className={({isActive})=>`nav-btn${isActive?' active':''}`}>⚙️ Admin</NavLink>
+          )}
+          {!currentUser?.is_admin && hasDashboardAccess && (
+            <NavLink to="/dashboard" className={({isActive})=>`nav-btn${isActive?' active':''}`}>📊 Dashboard</NavLink>
           )}
           <span className="user-badge" style={{marginLeft:'8px'}}>
             {currentUser?.first_name}

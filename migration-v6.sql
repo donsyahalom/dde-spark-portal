@@ -1,0 +1,49 @@
+-- ── DDE Spark Portal — Migration v6 ──────────────────────────────────────────
+-- Adds: teams, team_members, dashboard_access tables
+-- Adds: spark_value setting ($ per spark)
+-- Run this AFTER migration-v5.sql has been applied.
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- 1. spark_value setting (default $1.00 per spark)
+INSERT INTO settings (key, value) VALUES ('spark_value', '1.00')
+ON CONFLICT (key) DO NOTHING;
+
+-- 2. Teams table
+CREATE TABLE IF NOT EXISTS teams (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  pm_id UUID REFERENCES employees(id) ON DELETE SET NULL,
+  foreman_id UUID REFERENCES employees(id) ON DELETE SET NULL,
+  team_lead_can_view_dashboard BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+GRANT ALL ON teams TO anon;
+ALTER TABLE teams DISABLE ROW LEVEL SECURITY;
+
+-- 3. Team members (many-to-many employees <-> teams)
+CREATE TABLE IF NOT EXISTS team_members (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+  employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(team_id, employee_id)
+);
+GRANT ALL ON team_members TO anon;
+ALTER TABLE team_members DISABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_team_members_team ON team_members(team_id);
+CREATE INDEX IF NOT EXISTS idx_team_members_emp ON team_members(employee_id);
+
+-- 4. Dashboard access grants
+--    access_level: 'full' (incl $) | 'team' (excl $, own teams only)
+CREATE TABLE IF NOT EXISTS dashboard_access (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  access_level TEXT NOT NULL DEFAULT 'team' CHECK (access_level IN ('full', 'team')),
+  granted_by UUID REFERENCES employees(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(employee_id)
+);
+GRANT ALL ON dashboard_access TO anon;
+ALTER TABLE dashboard_access DISABLE ROW LEVEL SECURITY;
+CREATE INDEX IF NOT EXISTS idx_dashboard_access_emp ON dashboard_access(employee_id);
