@@ -66,3 +66,8 @@ BEGIN
     ALTER TABLE teams DROP COLUMN IF EXISTS foreman_id;
   END IF;
 END $$;
+
+-- 6. Add is_optional flag to employees
+--    Optional employees are included in the "Including Optional" calculation
+--    but excluded from the "Excluding Optional" calculation (same as PM4/Owner).
+ALTER TABLE employees ADD COLUMN IF NOT EXISTS is_optional BOOLEAN DEFAULT FALSE;

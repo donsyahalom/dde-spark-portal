@@ -127,7 +127,7 @@ export default function AdminPage() {
   const [batchRunning, setBatchRunning] = useState(false)
   const [batchErrors, setBatchErrors] = useState([])   // shown in UI after import
 
-  const emptyForm = { first_name:'', last_name:'', email:'', phone:'', carrier:'', initial_sparks:0, daily_accrual:0, job_grade:'', job_title:'', is_management:false, has_spark_list:false, notify_email:true, notify_sms:false }
+  const emptyForm = { first_name:'', last_name:'', email:'', phone:'', carrier:'', initial_sparks:0, daily_accrual:0, job_grade:'', job_title:'', is_management:false, has_spark_list:false, is_optional:false, notify_email:true, notify_sms:false }
   const [form, setForm] = useState(emptyForm)
   const [batchText, setBatchText] = useState('')
   const [editEmp, setEditEmp] = useState(null)
@@ -396,7 +396,7 @@ export default function AdminPage() {
 
     for (const line of lines) {
       const parts = line.split(',').map(s => s?.trim())
-      const [fn, ln, phone, email, init, accrual, grade, title, isMgmt, hasList, notifEmail, notifSms, carrier] = parts
+      const [fn, ln, phone, email, init, accrual, grade, title, isMgmt, hasList, notifEmail, notifSms, carrier, isOptional] = parts
       if (!fn || !ln || !email) {
         errors++
         const nameStr = [fn, ln].filter(Boolean).join(' ') || '(unknown name)'
@@ -412,6 +412,7 @@ export default function AdminPage() {
       const hasSparkListVal = hasList?.toLowerCase() === 'true'
       const notifyEmailVal = notifEmail?.toLowerCase() !== 'false'
       const notifySmsVal = notifSms?.toLowerCase() === 'true'
+      const isOptionalVal = isOptional?.toLowerCase() === 'true'
       const carrierVal = carrier || ''
 
       const { data: existing } = await supabase.from('employees').select('id, vested_sparks, unvested_sparks').eq('email', emailLower).single()
@@ -421,7 +422,7 @@ export default function AdminPage() {
           first_name: fn, last_name: ln, phone: phone || '', email: emailLower,
           daily_accrual: a, daily_sparks_remaining: a,
           job_grade: grade || '', job_title: title || '',
-          is_management: isManagementVal, has_spark_list: hasSparkListVal,
+          is_management: isManagementVal, has_spark_list: hasSparkListVal, is_optional: isOptionalVal,
           notify_email: notifyEmailVal, notify_sms: notifySmsVal,
           carrier: carrierVal, updated_at: new Date().toISOString()
         }
@@ -436,7 +437,7 @@ export default function AdminPage() {
           vested_sparks: 0, unvested_sparks: initSparks,
           daily_accrual: a, daily_sparks_remaining: a,
           job_grade: grade || '', job_title: title || '',
-          is_management: isManagementVal, has_spark_list: hasSparkListVal,
+          is_management: isManagementVal, has_spark_list: hasSparkListVal, is_optional: isOptionalVal,
           notify_email: notifyEmailVal, notify_sms: notifySmsVal, carrier: carrierVal,
         })
         if (error) { errors++; errorDetails.push({ name: nameStr, email: emailLower, reason: error.message }) }
@@ -504,6 +505,7 @@ export default function AdminPage() {
       job_grade: form.job_grade, job_title: form.job_title,
       is_management: form.is_management || MANAGEMENT_GRADES.includes(form.job_grade),
       has_spark_list: form.has_spark_list,
+      is_optional: form.is_optional || false,
       notify_email: form.notify_email, notify_sms: form.notify_sms,
     })
     setLoading(false)
@@ -545,7 +547,7 @@ export default function AdminPage() {
       first_name: emp.first_name, last_name: emp.last_name, email: emp.email, phone: emp.phone || '', carrier: emp.carrier || '',
       vested_sparks: emp.vested_sparks || 0, unvested_sparks: emp.unvested_sparks || 0,
       daily_accrual: emp.daily_accrual || 0, job_grade: emp.job_grade || '', job_title: emp.job_title || '',
-      is_management: emp.is_management || false, has_spark_list: emp.has_spark_list || false,
+      is_management: emp.is_management || false, has_spark_list: emp.has_spark_list || false, is_optional: emp.is_optional || false,
       notify_email: emp.notify_email !== false, notify_sms: emp.notify_sms || false,
     })
   }
@@ -562,6 +564,7 @@ export default function AdminPage() {
       job_grade: editValues.job_grade, job_title: editValues.job_title,
       is_management: editValues.is_management || MANAGEMENT_GRADES.includes(editValues.job_grade),
       has_spark_list: editValues.has_spark_list,
+      is_optional: editValues.is_optional || false,
       notify_email: editValues.notify_email, notify_sms: editValues.notify_sms,
       updated_at: new Date().toISOString()
     }).eq('id', editEmp.id)
@@ -819,6 +822,7 @@ export default function AdminPage() {
                         <div style={{display:'flex',gap:'3px',flexWrap:'wrap'}}>
                           {emp.is_management&&<span className="chip chip-gold" style={{fontSize:'0.58rem',padding:'1px 4px'}}>Mgmt</span>}
                           {emp.has_spark_list&&<span className="chip chip-green" style={{fontSize:'0.58rem',padding:'1px 4px'}}>List</span>}
+                          {emp.is_optional&&<span className="chip chip-gold" style={{fontSize:'0.58rem',padding:'1px 4px',opacity:0.7}}>Optional</span>}
                         </div>
                       </td>
                       <td>
@@ -878,6 +882,7 @@ export default function AdminPage() {
             <div style={{display:'flex',gap:'16px',flexWrap:'wrap',marginBottom:'12px'}}>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={form.is_management} onChange={e=>setForm(f=>({...f,is_management:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Management</label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={form.has_spark_list} onChange={e=>setForm(f=>({...f,has_spark_list:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Spark List</label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={form.is_optional} onChange={e=>setForm(f=>({...f,is_optional:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Optional</label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={form.notify_email} onChange={e=>setForm(f=>({...f,notify_email:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📧 Email Notifs</label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={form.notify_sms} onChange={e=>setForm(f=>({...f,notify_sms:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📱 SMS Notifs</label>
             </div>
@@ -896,7 +901,7 @@ export default function AdminPage() {
           <div style={{background:'rgba(0,0,0,0.3)',border:'1px solid var(--border)',borderRadius:'8px',padding:'14px 16px',marginBottom:'16px'}}>
             <div style={{fontFamily:'var(--font-display)',fontSize:'0.72rem',color:'var(--gold)',letterSpacing:'0.08em',marginBottom:'8px'}}>CSV FORMAT — ONE EMPLOYEE PER LINE</div>
             <code style={{fontSize:'0.72rem',color:'var(--white-soft)',display:'block',lineHeight:1.7,wordBreak:'break-all'}}>
-              FirstName, LastName, Phone, Email, InitialSparks, DailyAccrual, JobGrade, JobTitle, IsManagement, HasSparkList, NotifyEmail, NotifySMS, Carrier
+              FirstName, LastName, Phone, Email, InitialSparks, DailyAccrual, JobGrade, JobTitle, IsManagement, HasSparkList, NotifyEmail, NotifySMS, Carrier, IsOptional
             </code>
             <div style={{marginTop:'10px',display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:'4px 16px'}}>
               {[
@@ -907,6 +912,7 @@ export default function AdminPage() {
                 ['HasSparkList','true or false'],['NotifyEmail','true or false, default true'],
                 ['NotifySMS','true or false, default false'],
                 ['Carrier','Gateway suffix: @tmomail.net, @vtext.com, etc.'],
+                ['IsOptional','true or false — included in totals but excluded from the Excl Optional calc'],
               ].map(([field,desc]) => (
                 <div key={field} style={{fontSize:'0.7rem'}}>
                   <span style={{color:'var(--gold-light)',fontWeight:600}}>{field}</span>
@@ -1419,6 +1425,7 @@ export default function AdminPage() {
             <div style={{display:'flex',gap:'14px',flexWrap:'wrap',marginBottom:'14px'}}>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.is_management||false} onChange={e=>setEditValues(v=>({...v,is_management:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Management</label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.has_spark_list||false} onChange={e=>setEditValues(v=>({...v,has_spark_list:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Spark List</label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.is_optional||false} onChange={e=>setEditValues(v=>({...v,is_optional:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Optional</label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.notify_email!==false} onChange={e=>setEditValues(v=>({...v,notify_email:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📧 Email</label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.notify_sms||false} onChange={e=>setEditValues(v=>({...v,notify_sms:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📱 SMS</label>
             </div>

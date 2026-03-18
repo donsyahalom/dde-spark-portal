@@ -5,8 +5,8 @@ import { supabase } from '../lib/supabase'
 const PM4_OWNER_TITLES = ['Project Manager', 'Owner']
 const PM4_OWNER_GRADES = ['P1', 'P2', 'P3', 'P4', 'Owner']
 
-function isPm4OrOwner(emp) {
-  return PM4_OWNER_GRADES.includes(emp.job_grade) || PM4_OWNER_TITLES.includes(emp.job_title)
+function isExcluded(emp) {
+  return PM4_OWNER_GRADES.includes(emp.job_grade) || PM4_OWNER_TITLES.includes(emp.job_title) || emp.is_optional === true
 }
 
 function fmt$(n, sparkValue) {
@@ -194,7 +194,7 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
 
   // Split incl/excl PM4+Owner
   const empsAll = filteredEmps
-  const empsExcl = filteredEmps.filter(e => !isPm4OrOwner(e))
+  const empsExcl = filteredEmps.filter(e => !isExcluded(e))
 
   // Frequency / period helpers
   const freq = settings.spark_frequency || 'daily'
@@ -210,7 +210,7 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
   // Sparks given in period
   const sparksGivenAll = filteredTxns.reduce((s, t) => s + (t.amount || 0), 0)
   const sparksGivenExcl = filteredTxns
-    .filter(t => !isPm4OrOwner(t.from_emp || {}) && !isPm4OrOwner(t.to_emp || {}))
+    .filter(t => !isExcluded(t.from_emp || {}) && !isExcluded(t.to_emp || {}))
     .reduce((s, t) => s + (t.amount || 0), 0)
 
   // Allocated for period (not annualized — proportional to date range)
@@ -330,10 +330,10 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
             ? `Based on ${freq} accrual × ${periodsPerYear} periods/year · $${sv}/spark`
             : `Based on ${freq} accrual × ${periodsPerYear} periods/year`} />
         <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))' }}>
-          {showDollar && <StatCard label="Annual Sparks (All)" value={annualizedAll.toLocaleString()} color="var(--gold)" />}
-          {showDollar && <StatCard label="Annual $ (All)" value={`$${(annualizedAll * sv).toLocaleString('en-US', { maximumFractionDigits: 0 })}`} color="var(--gold)" />}
-          <StatCard label={showDollar ? "Annual Sparks (excl PM4/Owner)" : "Annual Sparks"} value={annualizedExcl.toLocaleString()} color="var(--green-bright)" />
-          {showDollar && <StatCard label="Annual $ (excl PM4/Owner)" value={`$${(annualizedExcl * sv).toLocaleString('en-US', { maximumFractionDigits: 0 })}`} color="var(--green-bright)" />}
+          {showDollar && <StatCard label="Annual Sparks (Incl Optional)" value={annualizedAll.toLocaleString()} color="var(--gold)" />}
+          {showDollar && <StatCard label="Annual $ (Incl Optional)" value={`$${(annualizedAll * sv).toLocaleString('en-US', { maximumFractionDigits: 0 })}`} color="var(--gold)" />}
+          <StatCard label={showDollar ? "Annual Sparks (Excl Optional)" : "Annual Sparks"} value={annualizedExcl.toLocaleString()} color="var(--green-bright)" />
+          {showDollar && <StatCard label="Annual $ (Excl Optional)" value={`$${(annualizedExcl * sv).toLocaleString('en-US', { maximumFractionDigits: 0 })}`} color="var(--green-bright)" />}
         </div>
       </div>
 
@@ -345,7 +345,7 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
           /* Full view: two-column incl/excl PM4 split */
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--gold)', fontFamily: 'var(--font-display)', letterSpacing: '0.07em', marginBottom: '10px' }}>INCLUDING PM4 + OWNER</div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--gold)', fontFamily: 'var(--font-display)', letterSpacing: '0.07em', marginBottom: '10px' }}>INCLUDING OPTIONAL</div>
               <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', marginBottom: '14px' }}>
                 <StatCard label="Allocated" value={allocatedAll} color="var(--white-soft)" />
                 <StatCard label="Given" value={sparksGivenAll} color="var(--gold)" />
@@ -354,7 +354,7 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
               </div>
             </div>
             <div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--green-bright)', fontFamily: 'var(--font-display)', letterSpacing: '0.07em', marginBottom: '10px' }}>EXCLUDING PM4 + OWNER</div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--green-bright)', fontFamily: 'var(--font-display)', letterSpacing: '0.07em', marginBottom: '10px' }}>EXCLUDING OPTIONAL</div>
               <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', marginBottom: '14px' }}>
                 <StatCard label="Allocated" value={allocatedExcl} color="var(--white-soft)" />
                 <StatCard label="Given" value={sparksGivenExcl} color="var(--green-bright)" />
@@ -374,8 +374,8 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
 
         {/* Utilization Gauges */}
         <div style={{ display: 'flex', gap: '32px', justifyContent: 'center', flexWrap: 'wrap', padding: '16px 0 4px' }}>
-          {showDollar && <UtilGauge used={sparksGivenAll} total={allocatedAll} label="Utilization (All)" color="var(--gold)" />}
-          <UtilGauge used={sparksGivenExcl} total={allocatedExcl} label={showDollar ? "Utilization (excl PM4/Owner)" : "Utilization"} color="var(--green-bright)" />
+          {showDollar && <UtilGauge used={sparksGivenAll} total={allocatedAll} label="Utilization (Incl Optional)" color="var(--gold)" />}
+          <UtilGauge used={sparksGivenExcl} total={allocatedExcl} label={showDollar ? "Utilization (Excl Optional)" : "Utilization"} color="var(--green-bright)" />
           {byTeam.map(t => <UtilGauge key={t.label} used={t.value} total={t.allocated} label={t.label} color="#80c4ff" />)}
         </div>
       </div>
@@ -421,18 +421,18 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
 
       {/* ── Company-wide Utilization ── */}
       <div className="card" style={{ marginBottom: '16px' }}>
-        <SectionHeader icon="🏢" title="COMPANY-WIDE UTILIZATION" sub={showDollar ? "All employees combined" : "Excludes PM4 + Owner"} />
+        <SectionHeader icon="🏢" title="COMPANY-WIDE UTILIZATION" sub={showDollar ? "All employees combined" : "Excludes optional employees"} />
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '24px', alignItems: 'center' }}>
-          {showDollar && <UtilGauge used={sparksGivenAll} total={allocatedAll} label={`Company (All) · ${utilAll}%`} color="var(--gold)" />}
-          <UtilGauge used={sparksGivenExcl} total={allocatedExcl} label={showDollar ? `Company (excl PM4) · ${utilExcl}%` : `Company · ${utilExcl}%`} color="var(--green-bright)" />
+          {showDollar && <UtilGauge used={sparksGivenAll} total={allocatedAll} label={`Company (Incl Optional) · ${utilAll}%`} color="var(--gold)" />}
+          <UtilGauge used={sparksGivenExcl} total={allocatedExcl} label={showDollar ? `Company (Excl Optional) · ${utilExcl}%` : `Company · ${utilExcl}%`} color="var(--green-bright)" />
           {showDollar && (
             <div style={{ flex: 1, minWidth: '180px' }}>
               <div style={{ marginBottom: '8px' }}>
-                <div style={{ fontSize: '0.72rem', color: 'var(--white-dim)', marginBottom: '4px' }}>$ Spend (period, all)</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--white-dim)', marginBottom: '4px' }}>$ Spend (period, Incl Optional)</div>
                 <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--gold)' }}>{fmt$(sparksGivenAll, sparkValue)}</div>
               </div>
               <div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--white-dim)', marginBottom: '4px' }}>$ Spend (period, excl PM4)</div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--white-dim)', marginBottom: '4px' }}>$ Spend (period, Excl Optional)</div>
                 <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--green-bright)' }}>{fmt$(sparksGivenExcl, sparkValue)}</div>
               </div>
             </div>
