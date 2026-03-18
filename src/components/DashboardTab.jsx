@@ -192,9 +192,15 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
       : transactions
   , [transactions, allowedEmpIds])
 
-  // Split incl/excl PM4+Owner
+  // Split incl/excl optional
   const empsAll = filteredEmps
   const empsExcl = filteredEmps.filter(e => !isExcluded(e))
+
+  // Build a Set of excluded employee IDs from the full employee records
+  // (transaction join objects don't carry is_optional, so we must use the emp list)
+  const excludedEmpIds = useMemo(() =>
+    new Set(filteredEmps.filter(e => isExcluded(e)).map(e => e.id))
+  , [filteredEmps])
 
   // Frequency / period helpers
   const freq = settings.spark_frequency || 'daily'
@@ -208,9 +214,12 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
   const annualizedExcl = empsExcl.reduce((s, e) => s + (e.daily_accrual || 0) * periodsPerYear, 0)
 
   // Sparks given in period
+  // For excl: exclude any transaction where either party is in the excluded set.
+  // We use excludedEmpIds (derived from full employee records) — not the lean join
+  // objects on transactions, which don't carry is_optional.
   const sparksGivenAll = filteredTxns.reduce((s, t) => s + (t.amount || 0), 0)
   const sparksGivenExcl = filteredTxns
-    .filter(t => !isExcluded(t.from_emp || {}) && !isExcluded(t.to_emp || {}))
+    .filter(t => !excludedEmpIds.has(t.from_employee_id) && !excludedEmpIds.has(t.to_employee_id))
     .reduce((s, t) => s + (t.amount || 0), 0)
 
   // Allocated for period (not annualized — proportional to date range)
