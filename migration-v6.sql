@@ -1,6 +1,7 @@
 -- ── DDE Spark Portal — Migration v6 ──────────────────────────────────────────
 -- Adds: teams, team_members, dashboard_access tables
 -- Adds: spark_value setting ($ per spark)
+-- PM and Foreman leads are stored as UUID arrays (multi-select support)
 -- Run this AFTER migration-v5.sql has been applied.
 -- ─────────────────────────────────────────────────────────────────────────────
 
@@ -9,11 +10,12 @@ INSERT INTO settings (key, value) VALUES ('spark_value', '1.00')
 ON CONFLICT (key) DO NOTHING;
 
 -- 2. Teams table
+--    pm_ids / foreman_ids are UUID arrays so multiple leads can be assigned
 CREATE TABLE IF NOT EXISTS teams (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
-  pm_id UUID REFERENCES employees(id) ON DELETE SET NULL,
-  foreman_id UUID REFERENCES employees(id) ON DELETE SET NULL,
+  pm_ids UUID[] DEFAULT '{}',
+  foreman_ids UUID[] DEFAULT '{}',
   team_lead_can_view_dashboard BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -47,3 +49,20 @@ CREATE TABLE IF NOT EXISTS dashboard_access (
 GRANT ALL ON dashboard_access TO anon;
 ALTER TABLE dashboard_access DISABLE ROW LEVEL SECURITY;
 CREATE INDEX IF NOT EXISTS idx_dashboard_access_emp ON dashboard_access(employee_id);
+
+-- 5. If teams table already existed with single-UUID columns, migrate them to arrays
+DO $$
+BEGIN
+  -- Rename old single-value columns if present, copy into arrays, then drop
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'teams' AND column_name = 'pm_id'
+  ) THEN
+    ALTER TABLE teams ADD COLUMN IF NOT EXISTS pm_ids UUID[] DEFAULT '{}';
+    ALTER TABLE teams ADD COLUMN IF NOT EXISTS foreman_ids UUID[] DEFAULT '{}';
+    UPDATE teams SET pm_ids = ARRAY[pm_id] WHERE pm_id IS NOT NULL;
+    UPDATE teams SET foreman_ids = ARRAY[foreman_id] WHERE foreman_id IS NOT NULL;
+    ALTER TABLE teams DROP COLUMN IF EXISTS pm_id;
+    ALTER TABLE teams DROP COLUMN IF EXISTS foreman_id;
+  END IF;
+END $$;

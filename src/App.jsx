@@ -6,6 +6,7 @@ import EmployeePage from './pages/EmployeePage'
 import AdminPage from './pages/AdminPage'
 import ChangePasswordPage from './pages/ChangePasswordPage'
 import MessageBoardPage from './pages/MessageBoardPage'
+import UserDashboardPage from './pages/UserDashboardPage'
 import DashboardPage from './pages/DashboardPage'
 import Layout from './components/Layout'
 import './styles.css'
@@ -34,6 +35,7 @@ function AppRoutes() {
         <Route path="board" element={<MessageBoardPage />} />
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
+        <Route path="dashboard" element={<ProtectedRoute><UserDashboardPage /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/leaderboard" />} />
     </Routes>

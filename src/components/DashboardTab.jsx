@@ -325,11 +325,14 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
 
       {/* ── Annualized Totals ── */}
       <div className="card" style={{ marginBottom: '16px' }}>
-        <SectionHeader icon="📈" title="ANNUALIZED SPARK BUDGET" sub={`Based on ${freq} accrual × ${periodsPerYear} periods/year · $${sv}/spark`} />
+        <SectionHeader icon="📈" title="ANNUALIZED SPARK BUDGET"
+          sub={showDollar
+            ? `Based on ${freq} accrual × ${periodsPerYear} periods/year · $${sv}/spark`
+            : `Based on ${freq} accrual × ${periodsPerYear} periods/year`} />
         <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))' }}>
-          <StatCard label="Annual Sparks (All)" value={annualizedAll.toLocaleString()} color="var(--gold)" />
+          {showDollar && <StatCard label="Annual Sparks (All)" value={annualizedAll.toLocaleString()} color="var(--gold)" />}
           {showDollar && <StatCard label="Annual $ (All)" value={`$${(annualizedAll * sv).toLocaleString('en-US', { maximumFractionDigits: 0 })}`} color="var(--gold)" />}
-          <StatCard label="Annual Sparks (excl PM4/Owner)" value={annualizedExcl.toLocaleString()} color="var(--green-bright)" />
+          <StatCard label={showDollar ? "Annual Sparks (excl PM4/Owner)" : "Annual Sparks"} value={annualizedExcl.toLocaleString()} color="var(--green-bright)" />
           {showDollar && <StatCard label="Annual $ (excl PM4/Owner)" value={`$${(annualizedExcl * sv).toLocaleString('en-US', { maximumFractionDigits: 0 })}`} color="var(--green-bright)" />}
         </div>
       </div>
@@ -337,33 +340,42 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
       {/* ── Period Stats ── */}
       <div className="card" style={{ marginBottom: '16px' }}>
         <SectionHeader icon="⚡" title="PERIOD ACTIVITY" sub={`${fmtDate(dateFrom)} – ${fmtDate(dateTo)} · ~${periods} ${freq} period${periods !== 1 ? 's' : ''}`} />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-          {/* All employees */}
-          <div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--gold)', fontFamily: 'var(--font-display)', letterSpacing: '0.07em', marginBottom: '10px' }}>INCLUDING PM4 + OWNER</div>
-            <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', marginBottom: '14px' }}>
-              <StatCard label="Allocated" value={allocatedAll} color="var(--white-soft)" />
-              <StatCard label="Given" value={sparksGivenAll} color="var(--gold)" />
-              <StatCard label="Remaining" value={Math.max(0, allocatedAll - sparksGivenAll)} color="var(--white-dim)" />
-              {showDollar && <StatCard label="$ Spend" value={fmt$(sparksGivenAll, sparkValue)} color="var(--gold)" />}
+
+        {showDollar ? (
+          /* Full view: two-column incl/excl PM4 split */
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--gold)', fontFamily: 'var(--font-display)', letterSpacing: '0.07em', marginBottom: '10px' }}>INCLUDING PM4 + OWNER</div>
+              <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', marginBottom: '14px' }}>
+                <StatCard label="Allocated" value={allocatedAll} color="var(--white-soft)" />
+                <StatCard label="Given" value={sparksGivenAll} color="var(--gold)" />
+                <StatCard label="Remaining" value={Math.max(0, allocatedAll - sparksGivenAll)} color="var(--white-dim)" />
+                <StatCard label="$ Spend" value={fmt$(sparksGivenAll, sparkValue)} color="var(--gold)" />
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--green-bright)', fontFamily: 'var(--font-display)', letterSpacing: '0.07em', marginBottom: '10px' }}>EXCLUDING PM4 + OWNER</div>
+              <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', marginBottom: '14px' }}>
+                <StatCard label="Allocated" value={allocatedExcl} color="var(--white-soft)" />
+                <StatCard label="Given" value={sparksGivenExcl} color="var(--green-bright)" />
+                <StatCard label="Remaining" value={Math.max(0, allocatedExcl - sparksGivenExcl)} color="var(--white-dim)" />
+                <StatCard label="$ Spend" value={fmt$(sparksGivenExcl, sparkValue)} color="var(--green-bright)" />
+              </div>
             </div>
           </div>
-          {/* Excl PM4/Owner */}
-          <div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--green-bright)', fontFamily: 'var(--font-display)', letterSpacing: '0.07em', marginBottom: '10px' }}>EXCLUDING PM4 + OWNER</div>
-            <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', marginBottom: '14px' }}>
-              <StatCard label="Allocated" value={allocatedExcl} color="var(--white-soft)" />
-              <StatCard label="Given" value={sparksGivenExcl} color="var(--green-bright)" />
-              <StatCard label="Remaining" value={Math.max(0, allocatedExcl - sparksGivenExcl)} color="var(--white-dim)" />
-              {showDollar && <StatCard label="$ Spend" value={fmt$(sparksGivenExcl, sparkValue)} color="var(--green-bright)" />}
-            </div>
+        ) : (
+          /* Team / no-$ view: excl PM4/Owner numbers only, no label */
+          <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(120px,1fr))', marginBottom: '14px' }}>
+            <StatCard label="Allocated" value={allocatedExcl} color="var(--white-soft)" />
+            <StatCard label="Given" value={sparksGivenExcl} color="var(--green-bright)" />
+            <StatCard label="Remaining" value={Math.max(0, allocatedExcl - sparksGivenExcl)} color="var(--white-dim)" />
           </div>
-        </div>
+        )}
 
         {/* Utilization Gauges */}
         <div style={{ display: 'flex', gap: '32px', justifyContent: 'center', flexWrap: 'wrap', padding: '16px 0 4px' }}>
-          <UtilGauge used={sparksGivenAll} total={allocatedAll} label="Utilization (All)" color="var(--gold)" />
-          <UtilGauge used={sparksGivenExcl} total={allocatedExcl} label="Utilization (excl PM4/Owner)" color="var(--green-bright)" />
+          {showDollar && <UtilGauge used={sparksGivenAll} total={allocatedAll} label="Utilization (All)" color="var(--gold)" />}
+          <UtilGauge used={sparksGivenExcl} total={allocatedExcl} label={showDollar ? "Utilization (excl PM4/Owner)" : "Utilization"} color="var(--green-bright)" />
           {byTeam.map(t => <UtilGauge key={t.label} used={t.value} total={t.allocated} label={t.label} color="#80c4ff" />)}
         </div>
       </div>
@@ -409,24 +421,22 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
 
       {/* ── Company-wide Utilization ── */}
       <div className="card" style={{ marginBottom: '16px' }}>
-        <SectionHeader icon="🏢" title="COMPANY-WIDE UTILIZATION" sub="All employees combined" />
+        <SectionHeader icon="🏢" title="COMPANY-WIDE UTILIZATION" sub={showDollar ? "All employees combined" : "Excludes PM4 + Owner"} />
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '24px', alignItems: 'center' }}>
-          <UtilGauge used={sparksGivenAll} total={allocatedAll} label={`Company (All) · ${utilAll}%`} color="var(--gold)" />
-          <UtilGauge used={sparksGivenExcl} total={allocatedExcl} label={`Company (excl PM4) · ${utilExcl}%`} color="var(--green-bright)" />
-          <div style={{ flex: 1, minWidth: '180px' }}>
-            {showDollar && (
+          {showDollar && <UtilGauge used={sparksGivenAll} total={allocatedAll} label={`Company (All) · ${utilAll}%`} color="var(--gold)" />}
+          <UtilGauge used={sparksGivenExcl} total={allocatedExcl} label={showDollar ? `Company (excl PM4) · ${utilExcl}%` : `Company · ${utilExcl}%`} color="var(--green-bright)" />
+          {showDollar && (
+            <div style={{ flex: 1, minWidth: '180px' }}>
               <div style={{ marginBottom: '8px' }}>
                 <div style={{ fontSize: '0.72rem', color: 'var(--white-dim)', marginBottom: '4px' }}>$ Spend (period, all)</div>
                 <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--gold)' }}>{fmt$(sparksGivenAll, sparkValue)}</div>
               </div>
-            )}
-            {showDollar && (
               <div>
                 <div style={{ fontSize: '0.72rem', color: 'var(--white-dim)', marginBottom: '4px' }}>$ Spend (period, excl PM4)</div>
                 <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--green-bright)' }}>{fmt$(sparksGivenExcl, sparkValue)}</div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
