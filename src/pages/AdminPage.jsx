@@ -6,6 +6,7 @@ import { sendTestNotification, isBeforeGoLive } from '../lib/notificationService
 import DashboardTab from '../components/DashboardTab'
 import TeamsTab from '../components/TeamsTab'
 import AdminTagsPanel from '../components/AdminTagsPanel'
+import PerformanceAdminPanel from '../components/PerformanceAdminPanel'
 
 // ── Hardcoded fallback lists (used only if DB is empty) ───────────────────────
 const DEFAULT_GRADES = ['Pre1','A1','A2','A3','A4','J1','J2','J3','J4','F1','F2','F3','F4','P1','P2','P3','P4','Owner']
@@ -761,7 +762,7 @@ export default function AdminPage() {
       )}
 
       <div className="tabs">
-        {[['dashboard','📊 Dashboard'],['employees','👥 Employees'],['add','➕ Add'],['batch','📋 Batch'],['teams','👷 Teams'],['tags','🏷️ Tags'],['settings','⚙️ Settings'],['lists','📝 Lists'],['reports','📊 Reports']].map(([t,label]) => (
+        {[['dashboard','📊 Dashboard'],['employees','👥 Employees'],['add','➕ Add'],['batch','📋 Batch'],['teams','👷 Teams'],['tags','🏷️ Tags'],['settings','⚙️ Settings'],['lists','📝 Lists'],['reports','📊 Reports'],['performance','📋 Performance']].map(([t,label]) => (
           <button key={t} className={`tab-btn${tab===t?' active':''}`} onClick={() => setTab(t)}>{label}</button>
         ))}
       </div>
@@ -777,6 +778,10 @@ export default function AdminPage() {
       )}
 
       {/* ── TAGS TAB ── */}
+      {tab==='performance'&&(
+        <PerformanceAdminPanel employees={employees} showMsg={showMsg} />
+      )}
+
       {tab==='tags'&&(
         <AdminTagsPanel employees={employees} showMsg={showMsg} />
       )}

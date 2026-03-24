@@ -8,6 +8,7 @@ import ChangePasswordPage from './pages/ChangePasswordPage'
 import MessageBoardPage from './pages/MessageBoardPage'
 import UserDashboardPage from './pages/UserDashboardPage'
 import DashboardPage from './pages/DashboardPage'
+import PerformanceRatingPage from './pages/PerformanceRatingPage'
 import Layout from './components/Layout'
 import './styles.css'
 
@@ -19,6 +20,15 @@ function ProtectedRoute({ children, adminOnly = false }) {
   if (currentUser.must_change_password && window.location.pathname !== '/change-password') {
     return <Navigate to="/change-password" />
   }
+  return children
+}
+
+// Guard: foreman or admin only
+function ForemanRoute({ children }) {
+  const { currentUser } = useAuth()
+  const grade = currentUser?.job_grade || ''
+  const isForeman = currentUser?.is_admin || /^[FP]/.test(grade) || grade === 'Owner'
+  if (!isForeman) return <Navigate to="/leaderboard" />
   return children
 }
 
@@ -34,6 +44,7 @@ function AppRoutes() {
         <Route path="my-sparks" element={<EmployeePage />} />
         <Route path="board" element={<MessageBoardPage />} />
         <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="performance" element={<ForemanRoute><PerformanceRatingPage /></ForemanRoute>} />
         <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
         <Route path="dashboard" element={<ProtectedRoute><UserDashboardPage /></ProtectedRoute>} />
       </Route>
