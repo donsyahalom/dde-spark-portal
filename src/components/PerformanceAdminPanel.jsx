@@ -491,7 +491,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
         <thead><tr>
           <th>Employee</th><th>Grade</th><th>Peer Group</th><th>Overall Score</th>
           ${catHeaderCells}
-          <th>Sparks Given</th><th>Sparks Rcvd</th><th>Top Spark Reasons</th><th>Cycle Detail</th>
+          <th>Sparks Given</th><th>Sparks Rcvd</th><th>Top Sparks Reasons</th><th>Cycle Detail</th>
         </tr></thead>
         <tbody>${summaryRows}</tbody>
       </table>

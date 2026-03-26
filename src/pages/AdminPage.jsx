@@ -89,7 +89,7 @@ function DualScrollTable({ children }) {
 
 // ── TYPE_LABELS ───────────────────────────────────────────────────────────────
 const TYPE_LABELS = {
-  assign:       { label:'Peer Spark',  color:'gold' },
+  assign:       { label:'Peer Sparks',  color:'gold' },
   admin_adjust: { label:'Admin Adj.',  color:'red'  },
   cashout:      { label:'Cash Out',    color:'green' },
   initial:      { label:'Initial',     color:'gold' },
@@ -582,7 +582,7 @@ export default function AdminPage() {
 
   const processCashout = async () => {
     const n = parseInt(cashoutSparks)
-    if (!n || n < 1) { showMsg('error', 'Enter valid spark amount'); return }
+    if (!n || n < 1) { showMsg('error', 'Enter valid sparks amount'); return }
     const total = (cashoutEmp.vested_sparks || 0) + (cashoutEmp.unvested_sparks || 0)
     if (n > total) { showMsg('error', `Only ${total} sparks available`); return }
     setLoading(true)
@@ -670,9 +670,9 @@ export default function AdminPage() {
   const exportPDF = () => {
     const win = window.open('', '_blank')
     const content = reportRef.current?.innerHTML || '<p>No report data</p>'
-    win.document.write(`<!DOCTYPE html><html><head><title>DDE Spark Report</title>
+    win.document.write(`<!DOCTYPE html><html><head><title>DDE Sparks Report</title>
 <style>body{font-family:Arial,sans-serif;color:#222;padding:20px;font-size:12px;}h1{color:#26643F;font-size:18px;}h2{color:#26643F;font-size:14px;margin-top:20px;}table{width:100%;border-collapse:collapse;margin-top:10px;}th{background:#26643F;color:#fff;padding:6px 8px;text-align:left;font-size:11px;}td{padding:5px 8px;border-bottom:1px solid #ddd;font-size:11px;}@media print{body{padding:0;}}</style>
-</head><body><h1>DDE Spark Portal — Report</h1><p style="color:#666">Generated: ${new Date().toLocaleString()}</p>${content}<script>window.onload=()=>window.print()</script></body></html>`)
+</head><body><h1>DDE Sparks Portal — Report</h1><p style="color:#666">Generated: ${new Date().toLocaleString()}</p>${content}<script>window.onload=()=>window.print()</script></body></html>`)
     win.document.close()
   }
 
@@ -1068,10 +1068,10 @@ export default function AdminPage() {
           {/* ── SPARK REASON CATEGORIES ── */}
           <div className="card" style={{marginBottom:'16px'}}>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'10px',marginBottom:'6px'}}>
-              <div className="card-title" style={{marginBottom:0}}><span className="icon">💬</span> Spark Reason Categories ({reasonItems.length})</div>
+              <div className="card-title" style={{marginBottom:0}}><span className="icon">💬</span> Sparks Reason Categories ({reasonItems.length})</div>
               <button className="btn btn-outline btn-sm" onClick={()=>downloadListCsv('reason-categories.csv',['Order','Category'],reasonItems.map((r,i)=>[i+1,r.value]))}>⬇️ Download CSV</button>
             </div>
-            <p style={{color:'var(--white-dim)',fontSize:'0.8rem',marginBottom:'14px'}}>Shown to employees when giving a spark. Reorder, add, or remove as needed.</p>
+            <p style={{color:'var(--white-dim)',fontSize:'0.8rem',marginBottom:'14px'}}>Shown to employees when giving sparks. Reorder, add, or remove as needed.</p>
 
             <div style={{display:'flex',flexDirection:'column',gap:'6px',marginBottom:'18px'}}>
               {reasonItems.map((item, i) => (
@@ -1084,7 +1084,7 @@ export default function AdminPage() {
                       style={{background:'none',border:'none',cursor:i===reasonItems.length-1?'default':'pointer',color:i===reasonItems.length-1?'rgba(255,255,255,0.15)':'var(--white-dim)',fontSize:'0.7rem',padding:'0 3px',lineHeight:1.2}}>▼</button>
                   </div>
                   <span style={{flex:1,fontWeight:600,fontSize:'0.88rem',color:'var(--white-soft)'}}>{item.value}</span>
-                  <button onClick={()=>{if(window.confirm(`Remove reason "${item.value}"? This won't affect past spark records.`)) removeListItem(item.id)}}
+                  <button onClick={()=>{if(window.confirm(`Remove reason — this won't affect past sparks records.`)) removeListItem(item.id)}}
                     style={{background:'none',border:'none',cursor:'pointer',color:'var(--white-dim)',fontSize:'1rem',padding:'2px 5px',borderRadius:'4px',flexShrink:0}}
                     title="Remove" onMouseEnter={e=>e.target.style.color='var(--red)'} onMouseLeave={e=>e.target.style.color='var(--white-dim)'}>×</button>
                 </div>
@@ -1127,11 +1127,11 @@ export default function AdminPage() {
                 </button>
               </div>
 
-              {/* Spark Frequencies */}
+              {/* Sparks Frequencies */}
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(0,0,0,0.2)',border:'1px solid var(--border)',borderRadius:'8px',padding:'12px 16px',flexWrap:'wrap',gap:'8px'}}>
                 <div>
-                  <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--white-soft)'}}>Spark Frequencies</div>
-                  <div style={{fontSize:'0.75rem',color:'var(--white-dim)',marginTop:'2px'}}>{FREQUENCY_OPTIONS.length} options — controls how often employees accrue giving allowances</div>
+                  <div style={{fontWeight:700,fontSize:'0.88rem',color:'var(--white-soft)'}}>Sparks Frequencies</div>
+                  <div style={{fontSize:'0.75rem',color:'var(--white-dim)',marginTop:'2px'}}>{FREQUENCY_OPTIONS.length} options — controls how often employees accrue sparks giving allowances</div>
                   <div style={{display:'flex',flexWrap:'wrap',gap:'4px',marginTop:'6px'}}>
                     {FREQUENCY_OPTIONS.map(f=>(
                       <span key={f.value} style={{fontSize:'0.68rem',background:'rgba(255,255,255,0.07)',border:'1px solid var(--border)',borderRadius:'10px',padding:'1px 7px',color:'var(--white-dim)'}}>{f.label}</span>
@@ -1139,7 +1139,7 @@ export default function AdminPage() {
                   </div>
                 </div>
                 <button className="btn btn-outline btn-sm" style={{flexShrink:0}}
-                  onClick={()=>downloadListCsv('spark-frequencies.csv',['Value','Label','Reset Description'],FREQUENCY_OPTIONS.map(f=>[f.value,f.label,f.resetDesc]))}>
+                  onClick={()=>downloadListCsv('sparks-frequencies.csv',['Value','Label','Reset Description'],FREQUENCY_OPTIONS.map(f=>[f.value,f.label,f.resetDesc]))}>
                   ⬇️ Download CSV
                 </button>
               </div>
@@ -1160,14 +1160,14 @@ export default function AdminPage() {
             </div>
           )}
           <div className="card" style={{marginBottom:'16px'}}>
-            <div className="card-title"><span className="icon">⚙️</span> Spark Settings</div>
+            <div className="card-title"><span className="icon">⚙️</span> Sparks Settings</div>
             <div className="form-grid">
               <div className="form-group">
                 <label className="form-label">Vesting Period (Days)</label>
                 <input className="form-input" type="number" min="1" max="365" value={settings.vesting_period_days||30} onChange={e=>setSettings(s=>({...s,vesting_period_days:e.target.value}))} />
               </div>
               <div className="form-group">
-                <label className="form-label">Spark Frequency</label>
+                <label className="form-label">Sparks Frequency</label>
                 <select className="form-select" value={settings.spark_frequency||'daily'} onChange={e=>setSettings(s=>({...s,spark_frequency:e.target.value}))}>
                   {FREQUENCY_OPTIONS.map(f=><option key={f.value} value={f.value}>{f.label} — resets {f.resetDesc}</option>)}
                 </select>
@@ -1252,7 +1252,7 @@ export default function AdminPage() {
           <div className="card" style={{marginBottom:'16px'}}>
             <div className="card-title"><span className="icon">⏰</span> Reminder Settings</div>
             <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'14px'}}>
-              Up to 3 reminders before spark allowance expires (after go-live). Daily frequency: reminders under 24h are ignored.
+              Up to 3 reminders before sparks allowance expires (after go-live). Daily frequency: reminders under 24h are ignored.
             </p>
             <div style={{display:'flex',gap:'12px',flexWrap:'wrap',marginBottom:'12px'}}>
               {reminderOffsets.map((val,i) => (

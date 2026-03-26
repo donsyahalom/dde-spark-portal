@@ -24,7 +24,7 @@ export default function Layout() {
       <header className="header">
         <div className="header-left">
           <img src="/logo.png" alt="DDE Logo" className="header-logo" onError={e=>{e.target.style.display='none'}} />
-          <span className="header-title">DDE Spark Portal</span>
+          <span className="header-title">DDE Sparks Portal</span>
         </div>
         <nav className="header-nav">
           <NavLink to="/leaderboard" className={({isActive})=>`nav-btn${isActive?' active':''}`}>&#x1F3C6; Board</NavLink>

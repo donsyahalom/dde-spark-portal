@@ -9,8 +9,7 @@ const PER_PERSON_CAP = 2
 
 export default function EmployeePage() {
   const { currentUser, refreshUser } = useAuth()
-  const isManagement = me?.is_management || false
-  const hasList = me?.has_spark_list || false
+  const [me, setMe] = useState(currentUser)
   const [allEmployees, setAllEmployees] = useState([])
   const [employees, setEmployees] = useState([])
   const [settings, setSettings] = useState({ vesting_period_days: 30, spark_frequency: 'daily', min_redemption_amount: 20 })
@@ -231,7 +230,7 @@ export default function EmployeePage() {
 
       {/* GIVE A SPARK */}
       <div className="card" style={{marginBottom:'20px'}}>
-        <div className="card-title"><span className="icon">✨</span> Give a Spark</div>
+        <div className="card-title"><span className="icon">✨</span> Give Sparks</div>
         {msg && <div className={`alert alert-${msg.type}`}>{msg.text}</div>}
         {dailyRemaining === 0 ? (
           <div className="alert alert-warning">🌙 You've used all your {periodLabel} sparks! They reset at {resetDesc}.</div>
@@ -284,11 +283,11 @@ export default function EmployeePage() {
             </div>
             <button className="btn btn-gold" onClick={handleAssign}
               disabled={loading || !selEmp || maxCanGive <= 0 || !reasonValid}>
-              {loading ? 'Sending...' : '✨ Give Spark'}
+              {loading ? 'Sending...' : '✨ Give Sparks'}
             </button>
             {selEmp && !reasonValid && (
               <p style={{fontSize:'0.75rem',color:'rgba(224,85,85,0.8)',marginTop:'8px'}}>
-                ⚠️ Both the recognition category and details are required to give a spark.
+                ⚠️ Both the recognition category and details are required to give sparks.
               </p>
             )}
           </>
@@ -298,7 +297,7 @@ export default function EmployeePage() {
       {/* LIST DISTRIBUTION */}
       {hasList && (
         <div className="card" style={{marginBottom:'20px'}}>
-          <div className="card-title"><span className="icon">📋</span> {freqLabel} Spark Distribution List</div>
+          <div className="card-title"><span className="icon">📋</span> {freqLabel} Sparks Distribution List</div>
           {listMsg && <div className={`alert alert-${listMsg.type}`}>{listMsg.text}</div>}
           <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'12px'}}>
             Assign sparks to multiple employees at once. Max {PER_PERSON_CAP} per person, {dailyRemaining} remaining.
@@ -396,7 +395,7 @@ export default function EmployeePage() {
           {watchlistIds.length === 0
             ? <div className="empty-state"><div className="icon">👁️</div><p>No employees on watchlist. Click Edit Watchlist to add some.</p></div>
             : watchlistTxns.length === 0
-              ? <div className="empty-state"><div className="icon">📋</div><p>No spark activity for watched employees yet.</p></div>
+              ? <div className="empty-state"><div className="icon">📋</div><p>No sparks activity for watched employees yet.</p></div>
               : (
                 <>
                   <p style={{fontSize:'0.8rem',color:'var(--white-dim)',marginBottom:'12px'}}>Watching {watchlistIds.length} employee{watchlistIds.length !== 1 ? 's' : ''}</p>
