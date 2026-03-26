@@ -194,7 +194,6 @@ export default function EmployeePage() {
 
   return (
     <div className="fade-in">
-      <div>
       {expiryAlert && (
         <div style={{background:'rgba(224,85,85,0.2)',border:'1px solid rgba(224,85,85,0.5)',borderRadius:'10px',padding:'12px 16px',marginBottom:'20px',color:'#ff8080',fontWeight:600,fontSize:'0.9rem'}}>
           ⚠️ {expiryAlert}
