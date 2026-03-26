@@ -109,73 +109,80 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
   const [gradeRespSaving, setGradeRespSaving] = useState(false)
   const [profilesSubTab, setProfilesSubTab] = useState('grades')  // 'grades' | 'employees'
   const [workdayOverride, setWorkdayOverride] = useState({})  // cycleId -> override value string
+  const [systemGrades, setSystemGrades] = useState([])  // all grades from custom_lists in sort order
 
   // ── Load all data ─────────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const [
-      { data: cats },
-      { data: qs },
-      { data: cycleRows },
-      { data: ansRows },
-      { data: profRows },
-      { data: gradeRespRows },
-      { data: gradeListRows },
-      { data: teamsData },
-      { data: membersData },
-      { data: sparkTxns },
-      { data: empAllocData },
-    ] = await Promise.all([
-      supabase.from('perf_categories').select('*').order('sort_order'),
-      supabase.from('perf_questions').select('*').order('category_id').order('sort_order'),
-      supabase.from('perf_cycles')
-        .select('*, employee:employee_id(id,first_name,last_name,job_grade,job_title), foreman:foreman_id(id,first_name,last_name)')
-        .order('triggered_at', { ascending:false }),
-      supabase.from('perf_answers').select('*, question:question_id(category_id)'),
-      supabase.from('perf_employee_profiles').select('*'),
-      supabase.from('perf_grade_responsibilities').select('*').order('job_grade'),
-      supabase.from('custom_lists').select('value, sort_order').eq('list_type', 'job_grade').order('sort_order'),
-      supabase.from('teams').select('*').order('name'),
-      supabase.from('team_members').select('team_id, employee_id, employees(id,first_name,last_name,job_grade,job_title)'),
-      supabase.from('spark_transactions').select('from_employee_id, to_employee_id, amount, reason, transaction_type').eq('transaction_type', 'assign'),
-      supabase.from('employees').select('id, daily_sparks_remaining, daily_accrual'),
-    ])
-    setCategories(cats || [])
-    setQuestions(qs || [])
-    setCycles(cycleRows || [])
-    setAnswers(ansRows || [])
-    setProfiles(profRows || [])
-    setGradeResponsibilities(gradeRespRows || [])
-    setSystemGrades((gradeListRows || []).map(r => r.value))
-    setTeams(teamsData || [])
-    setTeamMembers(membersData || [])
+    try {
+      const [
+        { data: cats },
+        { data: qs },
+        { data: cycleRows },
+        { data: ansRows },
+        { data: profRows },
+        { data: gradeRespRows },
+        { data: gradeListRows },
+        { data: teamsData },
+        { data: membersData },
+        { data: sparkTxns },
+        { data: empAllocData },
+      ] = await Promise.all([
+        supabase.from('perf_categories').select('*').order('sort_order'),
+        supabase.from('perf_questions').select('*').order('category_id').order('sort_order'),
+        supabase.from('perf_cycles')
+          .select('*, employee:employee_id(id,first_name,last_name,job_grade,job_title), foreman:foreman_id(id,first_name,last_name)')
+          .order('triggered_at', { ascending:false }),
+        supabase.from('perf_answers').select('*, question:question_id(category_id)'),
+        supabase.from('perf_employee_profiles').select('*'),
+        supabase.from('perf_grade_responsibilities').select('*').order('job_grade'),
+        supabase.from('custom_lists').select('value, sort_order').eq('list_type', 'job_grade').order('sort_order'),
+        supabase.from('teams').select('*').order('name'),
+        supabase.from('team_members').select('team_id, employee_id, employees(id,first_name,last_name,job_grade,job_title)'),
+        supabase.from('spark_transactions').select('from_employee_id, to_employee_id, amount, reason, transaction_type').eq('transaction_type', 'assign'),
+        supabase.from('employees').select('id, daily_sparks_remaining, daily_accrual'),
+      ])
+      setCategories(cats || [])
+      setQuestions(qs || [])
+      setCycles(cycleRows || [])
+      setAnswers(ansRows || [])
+      setProfiles(profRows || [])
+      setGradeResponsibilities(gradeRespRows || [])
+      setSystemGrades((gradeListRows || []).map(r => r.value))
+      setTeams(teamsData || [])
+      setTeamMembers(membersData || [])
 
-    // ── Build per-employee sparks stats ──────────────────────────────────
-    const txns = sparkTxns || []
-    const allocMap = {}
-    ;(empAllocData || []).forEach(e => { allocMap[e.id] = e })
-    const stats = {}
-    txns.forEach(t => {
-      // Given
-      if (t.from_employee_id) {
-        if (!stats[t.from_employee_id]) stats[t.from_employee_id] = { given:0, allotted:0, received:0, receivedByReason:{} }
-        stats[t.from_employee_id].given += t.amount
-      }
-      // Received
-      if (t.to_employee_id) {
-        if (!stats[t.to_employee_id]) stats[t.to_employee_id] = { given:0, allotted:0, received:0, receivedByReason:{} }
-        stats[t.to_employee_id].received += t.amount
-        const cat = (t.reason || '').split(':')[0].trim() || 'Unspecified'
-        stats[t.to_employee_id].receivedByReason[cat] = (stats[t.to_employee_id].receivedByReason[cat] || 0) + t.amount
-      }
-    })
-    // Allotted = accrual (what they earn per period, used as the denominator baseline)
-    Object.keys(stats).forEach(id => {
-      const emp = allocMap[id]
-      stats[id].allotted = emp ? (emp.daily_accrual || 0) : 0
-    })
-    setSparkStats(stats)
-    setLoading(false)
+      // ── Build per-employee sparks stats ──────────────────────────────────
+      const txns = sparkTxns || []
+      const allocMap = {}
+      ;(empAllocData || []).forEach(e => { allocMap[e.id] = e })
+      const stats = {}
+      txns.forEach(t => {
+        // Given
+        if (t.from_employee_id) {
+          if (!stats[t.from_employee_id]) stats[t.from_employee_id] = { given:0, allotted:0, received:0, receivedByReason:{} }
+          stats[t.from_employee_id].given += t.amount
+        }
+        // Received
+        if (t.to_employee_id) {
+          if (!stats[t.to_employee_id]) stats[t.to_employee_id] = { given:0, allotted:0, received:0, receivedByReason:{} }
+          stats[t.to_employee_id].received += t.amount
+          const cat = (t.reason || '').split(':')[0].trim() || 'Unspecified'
+          stats[t.to_employee_id].receivedByReason[cat] = (stats[t.to_employee_id].receivedByReason[cat] || 0) + t.amount
+        }
+      })
+      // Allotted = accrual (what they earn per period, used as the denominator baseline)
+      Object.keys(stats).forEach(id => {
+        const emp = allocMap[id]
+        stats[id].allotted = emp ? (emp.daily_accrual || 0) : 0
+      })
+      setSparkStats(stats)
+    } catch (err) {
+      console.error('PerformanceAdminPanel fetchAll error:', err)
+      showMsg('Error loading performance data. Make sure the SQL migrations have been run in Supabase.', 'error')
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
