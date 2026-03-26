@@ -98,10 +98,15 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
   const [cycles, setCycles]       = useState([])
   const [answers, setAnswers]     = useState([])  // all answers
   const [profiles, setProfiles]   = useState([])
+  const [gradeResponsibilities, setGradeResponsibilities] = useState([])  // { id, job_grade, responsibilities }
   const [filterEmpId, setFilterEmpId] = useState('')
   const [editProfile, setEditProfile] = useState(null)  // { employee_id, responsibilities }
   const [profileText, setProfileText] = useState('')
   const [profileSaving, setProfileSaving] = useState(false)
+  const [editGradeResp, setEditGradeResp] = useState(null)  // { job_grade }
+  const [gradeRespText, setGradeRespText] = useState('')
+  const [gradeRespSaving, setGradeRespSaving] = useState(false)
+  const [profilesSubTab, setProfilesSubTab] = useState('grades')  // 'grades' | 'employees'
   const [workdayOverride, setWorkdayOverride] = useState({})  // cycleId -> override value string
 
   // ── Load all data ─────────────────────────────────────────────────────────
@@ -113,6 +118,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
       { data: cycleRows },
       { data: ansRows },
       { data: profRows },
+      { data: gradeRespRows },
       { data: teamsData },
       { data: membersData },
     ] = await Promise.all([
@@ -123,6 +129,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
         .order('triggered_at', { ascending:false }),
       supabase.from('perf_answers').select('*, question:question_id(category_id)'),
       supabase.from('perf_employee_profiles').select('*'),
+      supabase.from('perf_grade_responsibilities').select('*').order('job_grade'),
       supabase.from('teams').select('*').order('name'),
       supabase.from('team_members').select('team_id, employee_id, employees(id,first_name,last_name,job_grade,job_title)'),
     ])
@@ -131,6 +138,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
     setCycles(cycleRows || [])
     setAnswers(ansRows || [])
     setProfiles(profRows || [])
+    setGradeResponsibilities(gradeRespRows || [])
     setTeams(teamsData || [])
     setTeamMembers(membersData || [])
     setLoading(false)
@@ -213,7 +221,26 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
     fetchAll()
   }
 
-  // ── Profile (responsibilities) ─────────────────────────────────────────────
+  // ── Grade responsibilities ─────────────────────────────────────────────────
+  const saveGradeResp = async () => {
+    if (!editGradeResp) return
+    setGradeRespSaving(true)
+    await supabase.from('perf_grade_responsibilities').upsert({
+      job_grade: editGradeResp.job_grade,
+      responsibilities: gradeRespText,
+      updated_at: new Date().toISOString(),
+      updated_by: currentUser.id,
+    }, { onConflict: 'job_grade' })
+    setGradeResponsibilities(prev => {
+      const idx = prev.findIndex(r => r.job_grade === editGradeResp.job_grade)
+      const updated = { ...editGradeResp, responsibilities: gradeRespText }
+      return idx >= 0 ? prev.map((r, i) => i === idx ? updated : r) : [...prev, updated]
+    })
+    setEditGradeResp(null); setGradeRespText(''); setGradeRespSaving(false)
+    showMsg('Grade responsibilities saved')
+  }
+
+  // ── Profile (employee-specific responsibilities) ───────────────────────────
   const saveProfile = async () => {
     if (!editProfile) return
     setProfileSaving(true)
@@ -813,64 +840,234 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
       {/* ── PROFILES TAB ── */}
       {!loading && subTab==='profiles' && (
         <div>
-          <p style={{ color:'var(--white-dim)', fontSize:'0.85rem', marginBottom:'16px' }}>
-            Upload job responsibilities for each employee. These are visible to the foreman during evaluation.
-          </p>
-          {editProfile ? (
-            <div className="card" style={{ maxWidth:'600px' }}>
-              <div className="card-title">
-                Edit Profile — {employees.find(e=>e.id===editProfile.employee_id)?.first_name} {employees.find(e=>e.id===editProfile.employee_id)?.last_name}
-              </div>
-              <label className="form-label">Job Responsibilities</label>
-              <textarea
-                className="form-textarea"
-                style={{ height:'200px', width:'100%', fontFamily:'monospace', fontSize:'0.85rem' }}
-                value={profileText}
-                onChange={e=>setProfileText(e.target.value)}
-                placeholder="Paste or type responsibilities here. This will be visible to the foreman during evaluation."
-              />
-              <div style={{ display:'flex', gap:'10px', marginTop:'12px' }}>
-                <button className="btn btn-gold btn-sm" disabled={profileSaving} onClick={saveProfile}>
-                  {profileSaving ? 'Saving…' : 'Save Profile'}
-                </button>
-                <button className="btn btn-outline btn-sm" onClick={()=>{setEditProfile(null);setProfileText('')}}>Cancel</button>
-              </div>
-            </div>
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Employee</th><th>Grade</th><th>Title</th><th>Profile Status</th><th>Action</th></tr></thead>
-                <tbody>
-                  {employees.map(e => {
-                    const prof = profiles.find(p => p.employee_id === e.id)
-                    return (
-                      <tr key={e.id}>
-                        <td style={{ color:'var(--white-soft)' }}>{e.last_name}, {e.first_name}</td>
-                        <td style={{ color:'var(--gold)', fontSize:'0.82rem' }}>{e.job_grade}</td>
-                        <td style={{ color:'var(--white-dim)', fontSize:'0.82rem' }}>{e.job_title}</td>
-                        <td>
-                          <span style={{
-                            fontSize:'0.75rem', padding:'2px 8px', borderRadius:'20px',
-                            background: prof ? 'rgba(94,232,138,0.1)' : 'rgba(255,255,255,0.06)',
-                            color: prof ? 'var(--green-bright)' : 'var(--white-dim)',
-                            border: `1px solid ${prof ? 'rgba(94,232,138,0.3)' : 'rgba(255,255,255,0.1)'}`,
-                          }}>
-                            {prof ? '✓ Uploaded' : 'None'}
-                          </span>
-                        </td>
-                        <td>
-                          <button className="btn btn-outline btn-xs" onClick={() => {
-                            setEditProfile({ employee_id: e.id })
-                            setProfileText(prof?.responsibilities || '')
-                          }}>
-                            {prof ? 'Edit' : 'Add'}
-                          </button>
-                        </td>
-                      </tr>
+          {/* Sub-tab switcher */}
+          <div style={{ display:'flex', gap:'6px', marginBottom:'20px' }}>
+            {[['grades','📋 By Job Grade'],['employees','👤 By Employee']].map(([t,label]) => (
+              <button
+                key={t}
+                className={`btn ${profilesSubTab===t ? 'btn-gold' : 'btn-outline'} btn-sm`}
+                onClick={() => { setProfilesSubTab(t); setEditProfile(null); setEditGradeResp(null); setProfileText(''); setGradeRespText('') }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── BY JOB GRADE ── */}
+          {profilesSubTab === 'grades' && (
+            <div>
+              <p style={{ color:'var(--white-dim)', fontSize:'0.85rem', marginBottom:'16px', lineHeight:1.6 }}>
+                Set standard responsibilities for each job grade. These are automatically shown to the foreman when rating any employee of that grade.
+              </p>
+
+              {editGradeResp ? (
+                <div className="card" style={{ maxWidth:'640px' }}>
+                  <div className="card-title">
+                    Edit Responsibilities — Grade <span style={{ color:'var(--gold)' }}>{editGradeResp.job_grade}</span>
+                  </div>
+                  <p style={{ fontSize:'0.8rem', color:'var(--white-dim)', marginBottom:'12px' }}>
+                    These responsibilities apply to <strong style={{ color:'var(--white-soft)' }}>all employees</strong> with grade {editGradeResp.job_grade}. Use one responsibility per line for best readability.
+                  </p>
+                  <label className="form-label">Responsibilities</label>
+                  <textarea
+                    className="form-textarea"
+                    style={{ height:'220px', width:'100%', fontFamily:'monospace', fontSize:'0.84rem' }}
+                    value={gradeRespText}
+                    onChange={e => setGradeRespText(e.target.value)}
+                    placeholder={'• Follow all safety protocols and PPE requirements\n• Complete assigned work to specification\n• Report to foreman at start and end of shift\n...'}
+                  />
+                  <div style={{ display:'flex', gap:'10px', marginTop:'12px' }}>
+                    <button className="btn btn-gold btn-sm" disabled={gradeRespSaving} onClick={saveGradeResp}>
+                      {gradeRespSaving ? 'Saving…' : 'Save'}
+                    </button>
+                    <button className="btn btn-outline btn-sm" onClick={() => { setEditGradeResp(null); setGradeRespText('') }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  {/* Grade list — one row per unique grade in the employees list */}
+                  {(() => {
+                    const allGrades = [...new Set(employees.map(e => e.job_grade).filter(Boolean))].sort()
+                    if (allGrades.length === 0) return (
+                      <div className="card" style={{ textAlign:'center', padding:'32px' }}>
+                        <p style={{ color:'var(--white-dim)' }}>No job grades found. Add employees with job grades first.</p>
+                      </div>
                     )
-                  })}
-                </tbody>
-              </table>
+                    return (
+                      <div style={{ display:'grid', gap:'10px' }}>
+                        {allGrades.map(grade => {
+                          const gradeResp = gradeResponsibilities.find(r => r.job_grade === grade)
+                          const empCount = employees.filter(e => e.job_grade === grade).length
+                          return (
+                            <div key={grade} className="card" style={{
+                              display:'flex', alignItems:'flex-start', justifyContent:'space-between',
+                              gap:'16px', flexWrap:'wrap',
+                              borderColor: gradeResp ? 'rgba(240,192,64,0.25)' : 'rgba(255,255,255,0.08)'
+                            }}>
+                              <div style={{ flex:1, minWidth:0 }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom: gradeResp ? '10px' : 0 }}>
+                                  <span style={{
+                                    fontFamily:'var(--font-display)', fontSize:'0.95rem',
+                                    color:'var(--gold)', letterSpacing:'0.06em'
+                                  }}>{grade}</span>
+                                  <span style={{ fontSize:'0.75rem', color:'var(--white-dim)' }}>
+                                    {empCount} employee{empCount !== 1 ? 's' : ''}
+                                  </span>
+                                  {gradeResp ? (
+                                    <span style={{
+                                      fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px',
+                                      background:'rgba(94,232,138,0.1)', color:'var(--green-bright)',
+                                      border:'1px solid rgba(94,232,138,0.3)'
+                                    }}>✓ Set</span>
+                                  ) : (
+                                    <span style={{
+                                      fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px',
+                                      background:'rgba(255,255,255,0.05)', color:'var(--white-dim)',
+                                      border:'1px solid rgba(255,255,255,0.1)'
+                                    }}>Not set</span>
+                                  )}
+                                </div>
+                                {gradeResp?.responsibilities && (
+                                  <div style={{
+                                    fontSize:'0.8rem', color:'var(--white-dim)', lineHeight:1.6,
+                                    whiteSpace:'pre-wrap',
+                                    overflow:'hidden', maxHeight:'4.8em',
+                                    maskImage:'linear-gradient(to bottom, black 60%, transparent 100%)',
+                                    WebkitMaskImage:'linear-gradient(to bottom, black 60%, transparent 100%)'
+                                  }}>
+                                    {gradeResp.responsibilities}
+                                  </div>
+                                )}
+                              </div>
+                              <button
+                                className="btn btn-outline btn-sm"
+                                style={{ flexShrink:0 }}
+                                onClick={() => {
+                                  setEditGradeResp({ job_grade: grade })
+                                  setGradeRespText(gradeResp?.responsibilities || '')
+                                }}
+                              >
+                                {gradeResp ? 'Edit' : '+ Add'}
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })()}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── BY EMPLOYEE ── */}
+          {profilesSubTab === 'employees' && (
+            <div>
+              <p style={{ color:'var(--white-dim)', fontSize:'0.85rem', marginBottom:'16px', lineHeight:1.6 }}>
+                Add employee-specific responsibilities that are <strong style={{ color:'var(--white-soft)' }}>in addition to</strong> their grade-level responsibilities. Both will be shown to the foreman during evaluation.
+              </p>
+
+              {editProfile ? (
+                <div className="card" style={{ maxWidth:'640px' }}>
+                  <div className="card-title">
+                    Additional Responsibilities — {employees.find(e=>e.id===editProfile.employee_id)?.first_name} {employees.find(e=>e.id===editProfile.employee_id)?.last_name}
+                    <span style={{ fontSize:'0.78rem', color:'var(--gold)', marginLeft:'8px', fontFamily:'var(--font-body)', fontWeight:400 }}>
+                      ({employees.find(e=>e.id===editProfile.employee_id)?.job_grade})
+                    </span>
+                  </div>
+
+                  {/* Show the grade-level responsibilities for context */}
+                  {(() => {
+                    const empGrade = employees.find(e=>e.id===editProfile.employee_id)?.job_grade
+                    const gradeResp = gradeResponsibilities.find(r => r.job_grade === empGrade)
+                    if (!gradeResp?.responsibilities) return null
+                    return (
+                      <div style={{
+                        marginBottom:'16px', padding:'12px', borderRadius:'8px',
+                        background:'rgba(240,192,64,0.06)', border:'1px solid rgba(240,192,64,0.15)'
+                      }}>
+                        <div style={{ fontSize:'0.75rem', color:'var(--gold)', marginBottom:'6px', letterSpacing:'0.04em' }}>
+                          GRADE {empGrade} STANDARD RESPONSIBILITIES (already included automatically)
+                        </div>
+                        <div style={{ fontSize:'0.78rem', color:'var(--white-dim)', lineHeight:1.6, whiteSpace:'pre-wrap' }}>
+                          {gradeResp.responsibilities}
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  <label className="form-label">Additional / Individual Responsibilities</label>
+                  <textarea
+                    className="form-textarea"
+                    style={{ height:'200px', width:'100%', fontFamily:'monospace', fontSize:'0.84rem' }}
+                    value={profileText}
+                    onChange={e => setProfileText(e.target.value)}
+                    placeholder={'• Serves as crew lead on building 3\n• Responsible for equipment sign-out\n• Training new A1 hire starting Q2\n...'}
+                  />
+                  <div style={{ display:'flex', gap:'10px', marginTop:'12px' }}>
+                    <button className="btn btn-gold btn-sm" disabled={profileSaving} onClick={saveProfile}>
+                      {profileSaving ? 'Saving…' : 'Save'}
+                    </button>
+                    <button className="btn btn-outline btn-sm" onClick={() => { setEditProfile(null); setProfileText('') }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Employee</th>
+                        <th>Grade</th>
+                        <th>Title</th>
+                        <th>Grade Resp.</th>
+                        <th>Individual Resp.</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {employees.map(e => {
+                        const prof = profiles.find(p => p.employee_id === e.id)
+                        const gradeResp = gradeResponsibilities.find(r => r.job_grade === e.job_grade)
+                        return (
+                          <tr key={e.id}>
+                            <td style={{ color:'var(--white-soft)' }}>{e.last_name}, {e.first_name}</td>
+                            <td style={{ color:'var(--gold)', fontSize:'0.82rem' }}>{e.job_grade || '—'}</td>
+                            <td style={{ color:'var(--white-dim)', fontSize:'0.82rem' }}>{e.job_title || '—'}</td>
+                            <td>
+                              <span style={{
+                                fontSize:'0.72rem', padding:'2px 7px', borderRadius:'20px',
+                                background: gradeResp ? 'rgba(240,192,64,0.1)' : 'rgba(255,255,255,0.05)',
+                                color: gradeResp ? 'var(--gold)' : 'var(--white-dim)',
+                                border: `1px solid ${gradeResp ? 'rgba(240,192,64,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                              }}>
+                                {gradeResp ? '✓ Set' : 'None'}
+                              </span>
+                            </td>
+                            <td>
+                              <span style={{
+                                fontSize:'0.72rem', padding:'2px 7px', borderRadius:'20px',
+                                background: prof ? 'rgba(94,232,138,0.1)' : 'rgba(255,255,255,0.05)',
+                                color: prof ? 'var(--green-bright)' : 'var(--white-dim)',
+                                border: `1px solid ${prof ? 'rgba(94,232,138,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                              }}>
+                                {prof ? '✓ Added' : 'None'}
+                              </span>
+                            </td>
+                            <td>
+                              <button className="btn btn-outline btn-xs" onClick={() => {
+                                setEditProfile({ employee_id: e.id })
+                                setProfileText(prof?.responsibilities || '')
+                              }}>
+                                {prof ? 'Edit' : 'Add'}
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -84,6 +84,7 @@ export default function PerformanceRatingPage() {
   const [cycles, setCycles] = useState([])             // perf_cycles for me as foreman
   const [answers, setAnswers] = useState({})            // { questionId: score }
   const [profile, setProfile] = useState(null)          // perf_employee_profiles
+  const [gradeResp, setGradeResp] = useState(null)       // perf_grade_responsibilities for this employee's grade
 
   const isAdmin = currentUser?.is_admin
   const grade = currentUser?.job_grade || ''
@@ -159,16 +160,21 @@ export default function PerformanceRatingPage() {
   [teamMembers, selectedEmpId])
 
   useEffect(() => {
-    if (!selectedCycle) { setAnswers({}); setProfile(null); return }
+    if (!selectedCycle) { setAnswers({}); setProfile(null); setGradeResp(null); return }
     const loadAnswersAndProfile = async () => {
-      const [{ data: ansRows }, { data: prof }] = await Promise.all([
+      const empGrade = selectedEmployee?.job_grade || ''
+      const [{ data: ansRows }, { data: prof }, { data: gResp }] = await Promise.all([
         supabase.from('perf_answers').select('*').eq('cycle_id', selectedCycle.id),
         supabase.from('perf_employee_profiles').select('*').eq('employee_id', selectedEmpId).single(),
+        empGrade
+          ? supabase.from('perf_grade_responsibilities').select('*').eq('job_grade', empGrade).single()
+          : Promise.resolve({ data: null }),
       ])
       const map = {}
       if (ansRows) ansRows.forEach(r => { map[r.question_id] = r.score })
       setAnswers(map)
       setProfile(prof || null)
+      setGradeResp(gResp || null)
     }
     loadAnswersAndProfile()
   }, [selectedCycle, selectedEmpId])
@@ -350,20 +356,57 @@ export default function PerformanceRatingPage() {
               )}
             </div>
 
-            {/* Responsibilities */}
-            {profile?.responsibilities && (
+            {/* Responsibilities — grade-level + employee-specific */}
+            {(gradeResp?.responsibilities || profile?.responsibilities) && (
               <details style={{ marginTop:'16px' }}>
                 <summary style={{ cursor:'pointer', color:'var(--gold-light)', fontSize:'0.85rem', userSelect:'none' }}>
                   📄 Job Responsibilities
+                  {gradeResp?.responsibilities && profile?.responsibilities && (
+                    <span style={{ fontSize:'0.72rem', color:'var(--white-dim)', marginLeft:'8px' }}>
+                      (grade standard + individual)
+                    </span>
+                  )}
                 </summary>
-                <div style={{
-                  marginTop:'10px', padding:'12px', borderRadius:'8px',
-                  background:'rgba(0,0,0,0.25)', border:'1px solid var(--border)',
-                  fontSize:'0.83rem', color:'var(--white-soft)', lineHeight:1.7,
-                  whiteSpace:'pre-wrap', maxHeight:'200px', overflowY:'auto'
-                }}>
-                  {profile.responsibilities}
-                </div>
+
+                {/* Grade-level responsibilities */}
+                {gradeResp?.responsibilities && (
+                  <div style={{ marginTop:'10px' }}>
+                    <div style={{
+                      fontSize:'0.72rem', letterSpacing:'0.06em',
+                      color:'var(--gold)', marginBottom:'6px'
+                    }}>
+                      {selectedEmployee?.job_grade} — STANDARD RESPONSIBILITIES
+                    </div>
+                    <div style={{
+                      padding:'12px', borderRadius:'8px',
+                      background:'rgba(240,192,64,0.06)', border:'1px solid rgba(240,192,64,0.15)',
+                      fontSize:'0.83rem', color:'var(--white-soft)', lineHeight:1.7,
+                      whiteSpace:'pre-wrap', maxHeight:'180px', overflowY:'auto'
+                    }}>
+                      {gradeResp.responsibilities}
+                    </div>
+                  </div>
+                )}
+
+                {/* Employee-specific additional responsibilities */}
+                {profile?.responsibilities && (
+                  <div style={{ marginTop:'10px' }}>
+                    <div style={{
+                      fontSize:'0.72rem', letterSpacing:'0.06em',
+                      color:'var(--green-bright)', marginBottom:'6px'
+                    }}>
+                      ADDITIONAL / INDIVIDUAL RESPONSIBILITIES
+                    </div>
+                    <div style={{
+                      padding:'12px', borderRadius:'8px',
+                      background:'rgba(94,232,138,0.05)', border:'1px solid rgba(94,232,138,0.15)',
+                      fontSize:'0.83rem', color:'var(--white-soft)', lineHeight:1.7,
+                      whiteSpace:'pre-wrap', maxHeight:'180px', overflowY:'auto'
+                    }}>
+                      {profile.responsibilities}
+                    </div>
+                  </div>
+                )}
               </details>
             )}
           </div>
