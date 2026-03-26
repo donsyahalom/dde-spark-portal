@@ -99,7 +99,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
   const [answers, setAnswers]     = useState([])  // all answers
   const [profiles, setProfiles]   = useState([])
   const [gradeResponsibilities, setGradeResponsibilities] = useState([])  // { id, job_grade, responsibilities }
-  const [systemGrades, setSystemGrades] = useState([])  // all grades from custom_lists in sort order
+  const [sparkStats, setSparkStats] = useState({})  // { empId: { given, allotted, received, receivedByReason } }
   const [filterEmpId, setFilterEmpId] = useState('')
   const [editProfile, setEditProfile] = useState(null)  // { employee_id, responsibilities }
   const [profileText, setProfileText] = useState('')
@@ -123,6 +123,8 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
       { data: gradeListRows },
       { data: teamsData },
       { data: membersData },
+      { data: sparkTxns },
+      { data: empAllocData },
     ] = await Promise.all([
       supabase.from('perf_categories').select('*').order('sort_order'),
       supabase.from('perf_questions').select('*').order('category_id').order('sort_order'),
@@ -135,6 +137,8 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
       supabase.from('custom_lists').select('value, sort_order').eq('list_type', 'job_grade').order('sort_order'),
       supabase.from('teams').select('*').order('name'),
       supabase.from('team_members').select('team_id, employee_id, employees(id,first_name,last_name,job_grade,job_title)'),
+      supabase.from('spark_transactions').select('from_employee_id, to_employee_id, amount, reason, transaction_type').eq('transaction_type', 'assign'),
+      supabase.from('employees').select('id, daily_sparks_remaining, daily_accrual'),
     ])
     setCategories(cats || [])
     setQuestions(qs || [])
@@ -145,6 +149,32 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
     setSystemGrades((gradeListRows || []).map(r => r.value))
     setTeams(teamsData || [])
     setTeamMembers(membersData || [])
+
+    // ── Build per-employee sparks stats ──────────────────────────────────
+    const txns = sparkTxns || []
+    const allocMap = {}
+    ;(empAllocData || []).forEach(e => { allocMap[e.id] = e })
+    const stats = {}
+    txns.forEach(t => {
+      // Given
+      if (t.from_employee_id) {
+        if (!stats[t.from_employee_id]) stats[t.from_employee_id] = { given:0, allotted:0, received:0, receivedByReason:{} }
+        stats[t.from_employee_id].given += t.amount
+      }
+      // Received
+      if (t.to_employee_id) {
+        if (!stats[t.to_employee_id]) stats[t.to_employee_id] = { given:0, allotted:0, received:0, receivedByReason:{} }
+        stats[t.to_employee_id].received += t.amount
+        const cat = (t.reason || '').split(':')[0].trim() || 'Unspecified'
+        stats[t.to_employee_id].receivedByReason[cat] = (stats[t.to_employee_id].receivedByReason[cat] || 0) + t.amount
+      }
+    })
+    // Allotted = accrual (what they earn per period, used as the denominator baseline)
+    Object.keys(stats).forEach(id => {
+      const emp = allocMap[id]
+      stats[id].allotted = emp ? (emp.daily_accrual || 0) : 0
+    })
+    setSparkStats(stats)
     setLoading(false)
   }, [])
 
@@ -347,61 +377,130 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
   // ── Generate report HTML ──────────────────────────────────────────────────
   const generateReport = () => {
     const now = new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'})
-    const summaryRows = empScoreSummaries.map(({ employee, cycles, weightedScore, totalWorkdays }) => {
+
+    // Per-employee category breakdown helper
+    const getCatBreakdown = (empId) => {
+      const empCycles = cycles.filter(c => c.employee_id === empId && c.status === 'submitted')
+      return categories.map(cat => {
+        const catQIds = questions.filter(q => q.category_id === cat.id).map(q => q.id)
+        const catAnswers = answers.filter(a =>
+          empCycles.some(c => c.id === a.cycle_id) && catQIds.includes(a.question_id) && a.score
+        )
+        const avg = catAnswers.length > 0
+          ? catAnswers.reduce((s, a) => s + a.score, 0) / catAnswers.length
+          : null
+        return { name: cat.name, avg }
+      })
+    }
+
+    const scoreColor = (s) => s >= 4 ? '#1d9e75' : s >= 3 ? '#ba7517' : '#e24b4a'
+
+    const summaryRows = empScoreSummaries.map(({ employee, cycles: empCycles, weightedScore, totalWorkdays }) => {
       const grade = employee?.job_grade || ''
       const peerGroup = getPeerGroupLabel(grade)
-      const cycleDetail = cycles.map(c =>
+      const ss = sparkStats[employee?.id]
+      const cycleDetail = empCycles.map(c =>
         `${c.foreman?.first_name||''} ${c.foreman?.last_name||''}: ${c.avgScore?.toFixed(1)||'—'} (${c.workdays} days)`
       ).join('<br/>')
+      const catBreakdown = getCatBreakdown(employee?.id)
+      const catCells = catBreakdown.map(({ name, avg }) =>
+        `<td style="font-size:10px;text-align:center;color:${avg ? scoreColor(avg) : '#999'};font-weight:${avg ? 600 : 400}">
+          ${avg ? avg.toFixed(1) : '—'}
+        </td>`
+      ).join('')
+      const sparksGiven = ss ? `${ss.given}${ss.allotted > 0 ? ` / ${ss.allotted}` : ''}` : '—'
+      const sparksReceived = ss ? ss.received : '—'
+      const topReasons = ss
+        ? Object.entries(ss.receivedByReason).sort((a,b)=>b[1]-a[1]).slice(0,3)
+            .map(([r,n]) => `${r}: ${n}`).join('<br/>') || '—'
+        : '—'
       return `
         <tr>
           <td>${employee?.last_name}, ${employee?.first_name}</td>
           <td>${grade}</td>
           <td>${peerGroup}</td>
-          <td style="font-weight:600;color:${weightedScore>=4?'#1d9e75':weightedScore>=3?'#ba7517':'#e24b4a'}">
+          <td style="font-weight:600;color:${weightedScore ? scoreColor(weightedScore) : '#999'}">
             ${weightedScore?.toFixed(2)||'—'}/5
           </td>
-          <td style="font-size:11px;">${cycleDetail}</td>
+          ${catCells}
+          <td style="font-size:10px;">${sparksGiven}</td>
+          <td style="font-size:10px;">${sparksReceived}</td>
+          <td style="font-size:9px;color:#666">${topReasons}</td>
+          <td style="font-size:9px;color:#666">${cycleDetail}</td>
         </tr>`
     }).join('')
+
+    const catHeaderCells = categories.map(c =>
+      `<th style="background:#26643F;color:#fff;padding:4px 5px;font-size:9px;text-align:center">${c.name}</th>`
+    ).join('')
 
     const peerGroupBlocks = Object.entries(PEER_GROUPS).map(([group, grades]) => {
       const groupEmps = empScoreSummaries.filter(s =>
         s.employee && grades.includes(s.employee.job_grade) && s.weightedScore !== null
       ).sort((a,b) => (b.weightedScore||0)-(a.weightedScore||0))
       if (groupEmps.length === 0) return ''
-      const rows = groupEmps.map(({ employee, weightedScore }, i) => `
-        <tr>
-          <td>#${i+1}</td>
-          <td>${employee?.last_name}, ${employee?.first_name}</td>
-          <td>${employee?.job_grade}</td>
-          <td style="font-weight:600">${weightedScore?.toFixed(2)||'—'}/5</td>
-        </tr>`).join('')
-      return `<h3 style="color:#26643F;margin-top:20px">${group} Group</h3>
-        <table><thead><tr><th>Rank</th><th>Employee</th><th>Grade</th><th>Score</th></tr></thead><tbody>${rows}</tbody></table>`
+      const rows = groupEmps.map(({ employee, weightedScore }, i) => {
+        const catBreakdown = getCatBreakdown(employee?.id)
+        const catCells = catBreakdown.map(({ name, avg }) =>
+          `<td style="text-align:center;color:${avg ? scoreColor(avg) : '#999'};font-weight:${avg ? 600 : 400}">${avg ? avg.toFixed(1) : '—'}</td>`
+        ).join('')
+        const ss = sparkStats[employee?.id]
+        return `
+          <tr>
+            <td>#${i+1}</td>
+            <td>${employee?.last_name}, ${employee?.first_name}</td>
+            <td>${employee?.job_grade}</td>
+            <td style="font-weight:600;color:${scoreColor(weightedScore)}">${weightedScore?.toFixed(2)||'—'}/5</td>
+            ${catCells}
+            <td>${ss ? ss.given : '—'}</td>
+            <td>${ss ? ss.received : '—'}</td>
+          </tr>`
+      }).join('')
+      const catThs = categories.map(c =>
+        `<th style="background:#3a7a50;color:#fff;padding:4px 5px;font-size:9px;text-align:center">${c.name}</th>`
+      ).join('')
+      return `
+        <h3 style="color:#26643F;margin-top:20px">${group} Group</h3>
+        <table>
+          <thead><tr>
+            <th>Rank</th><th>Employee</th><th>Grade</th><th>Score</th>
+            ${catThs}
+            <th>Given</th><th>Received</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`
     }).join('')
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
       <title>Performance Report — ${now}</title>
       <style>
-        body{font-family:Arial,sans-serif;color:#222;padding:20px;font-size:12px}
-        h1{color:#26643F;font-size:18px}h2{color:#26643F;font-size:15px;margin-top:24px}
-        h3{color:#26643F;font-size:13px;margin-top:16px}
+        body{font-family:Arial,sans-serif;color:#222;padding:20px;font-size:11px}
+        h1{color:#26643F;font-size:18px}h2{color:#26643F;font-size:14px;margin-top:24px}
+        h3{color:#26643F;font-size:12px;margin-top:16px}
         table{width:100%;border-collapse:collapse;margin-top:8px}
-        th{background:#26643F;color:#fff;padding:6px 8px;text-align:left;font-size:11px}
-        td{padding:5px 8px;border-bottom:1px solid #ddd;font-size:11px}
-        .subtitle{color:#666;font-size:11px;margin-bottom:20px}
+        th{background:#26643F;color:#fff;padding:5px 7px;text-align:left;font-size:10px}
+        td{padding:4px 7px;border-bottom:1px solid #eee;font-size:10px;vertical-align:top}
+        .subtitle{color:#666;font-size:10px;margin-bottom:16px}
         @media print{body{padding:0}}
       </style></head><body>
       <h1>DDE Performance Evaluation Report</h1>
       <p class="subtitle">Generated ${now} &nbsp;|&nbsp; ${empScoreSummaries.length} employees evaluated</p>
+
       <h2>Employee Summaries</h2>
-      <table><thead><tr><th>Employee</th><th>Grade</th><th>Peer Group</th><th>Weighted Score</th><th>Cycle Detail</th></tr></thead>
-      <tbody>${summaryRows}</tbody></table>
+      <table>
+        <thead><tr>
+          <th>Employee</th><th>Grade</th><th>Peer Group</th><th>Overall Score</th>
+          ${catHeaderCells}
+          <th>Sparks Given</th><th>Sparks Rcvd</th><th>Top Spark Reasons</th><th>Cycle Detail</th>
+        </tr></thead>
+        <tbody>${summaryRows}</tbody>
+      </table>
+
       <h2>Peer Group Rankings (Sparks Report)</h2>
       <p class="subtitle">Employees ranked within their grade group. Scores are work-day-weighted averages across all submitted evaluation cycles.</p>
       ${peerGroupBlocks}
       </body></html>`
+
     const w = window.open('', '_blank')
     w.document.write(html)
     w.document.close()
@@ -681,22 +780,29 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                     <th>Grade</th>
                     <th>Peer Group</th>
                     <th>Weighted Score</th>
+                    <th>Sparks Given</th>
+                    <th>Sparks Received</th>
                     <th>Cycles</th>
                     <th>Trend</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {empScoreSummaries.map(({ employee, cycles, weightedScore, scoreSeries }) => (
+                  {empScoreSummaries.map(({ employee, cycles, weightedScore, scoreSeries }) => {
+                    const ss = sparkStats[employee?.id]
+                    return (
                     <tr key={employee?.id} style={{ cursor:'pointer' }}
                       onClick={() => setFilterEmpId(employee?.id)}>
                       <td style={{ color:'var(--white-soft)' }}>{employee?.last_name}, {employee?.first_name}</td>
                       <td><span style={{ color:'var(--gold)', fontSize:'0.82rem' }}>{employee?.job_grade}</span></td>
                       <td style={{ fontSize:'0.8rem', color:'var(--white-dim)' }}>{getPeerGroupLabel(employee?.job_grade)}</td>
                       <td><ScoreBadge score={weightedScore}/></td>
+                      <td style={{ fontSize:'0.82rem', color:'var(--gold)' }}>{ss ? `${ss.given}${ss.allotted > 0 ? ` / ${ss.allotted}` : ''}` : '—'}</td>
+                      <td style={{ fontSize:'0.82rem', color:'var(--green-bright)' }}>{ss ? ss.received : '—'}</td>
                       <td style={{ fontSize:'0.8rem', color:'var(--white-dim)' }}>{cycles.filter(c=>c.status==='submitted').length} submitted</td>
                       <td><Sparkline scores={scoreSeries}/></td>
                     </tr>
-                  ))}
+                    )
+                  })}
                   {empScoreSummaries.length === 0 && (
                     <tr><td colSpan={6} style={{ color:'var(--white-dim)', textAlign:'center', padding:'24px' }}>No submitted evaluations yet.</td></tr>
                   )}
@@ -726,7 +832,70 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                 </div>
               </div>
 
-              {/* Category breakdown */}
+              {/* ── Sparks usage ── */}
+              {(() => {
+                const ss = sparkStats[filterEmpId]
+                if (!ss) return null
+                const sortedReasons = Object.entries(ss.receivedByReason)
+                  .sort((a, b) => b[1] - a[1])
+                const topReceived = sortedReasons.slice(0, 5)
+                return (
+                  <div className="card">
+                    <div className="card-title">⚡ Sparks Activity</div>
+                    <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))', gap:'10px', marginBottom:'20px' }}>
+                      {[
+                        { label:'Sparks Given', value: ss.given, sub: ss.allotted > 0 ? `of ${ss.allotted}/period allotted` : null, color:'var(--gold)' },
+                        { label:'Sparks Received', value: ss.received, sub:'all time', color:'var(--green-bright)' },
+                      ].map(({ label, value, sub, color }) => (
+                        <div key={label} style={{
+                          padding:'14px', borderRadius:'8px',
+                          background:'rgba(0,0,0,0.25)', border:'1px solid rgba(255,255,255,0.08)',
+                          textAlign:'center'
+                        }}>
+                          <div style={{ fontSize:'1.6rem', fontWeight:700, color, fontFamily:'var(--font-display)', letterSpacing:'0.04em' }}>
+                            {value}
+                          </div>
+                          <div style={{ fontSize:'0.78rem', color:'var(--white-soft)', marginTop:'4px' }}>{label}</div>
+                          {sub && <div style={{ fontSize:'0.7rem', color:'var(--white-dim)', marginTop:'2px' }}>{sub}</div>}
+                        </div>
+                      ))}
+                    </div>
+
+                    {topReceived.length > 0 && (
+                      <div>
+                        <div style={{ fontSize:'0.78rem', color:'var(--white-dim)', letterSpacing:'0.05em', marginBottom:'10px' }}>
+                          SPARKS RECEIVED BY REASON
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+                          {topReceived.map(([reason, count]) => {
+                            const pct = ss.received > 0 ? (count / ss.received) * 100 : 0
+                            return (
+                              <div key={reason} style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+                                <span style={{ flex:'0 0 180px', fontSize:'0.82rem', color:'var(--white-soft)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                                  {reason}
+                                </span>
+                                <div style={{ flex:1, height:'7px', background:'rgba(255,255,255,0.08)', borderRadius:'4px', overflow:'hidden' }}>
+                                  <div style={{ width:`${pct}%`, height:'100%', background:'var(--gold)', borderRadius:'4px', transition:'width 0.5s ease' }}/>
+                                </div>
+                                <span style={{ fontSize:'0.8rem', color:'var(--gold)', minWidth:'32px', textAlign:'right' }}>
+                                  {count}
+                                </span>
+                              </div>
+                            )
+                          })}
+                          {sortedReasons.length > 5 && (
+                            <div style={{ fontSize:'0.75rem', color:'var(--white-dim)', paddingTop:'4px' }}>
+                              +{sortedReasons.length - 5} more categories
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* ── Category breakdown ── */}
               <div className="card">
                 <div className="card-title">Score by Category</div>
                 <div style={{ display:'grid', gap:'12px' }}>
@@ -1122,20 +1291,51 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
             <div className="table-wrap">
               <table>
                 <thead>
-                  <tr><th>Employee</th><th>Grade</th><th>Peer Group</th><th>Score</th><th>Trend</th></tr>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Grade</th>
+                    <th>Score</th>
+                    {categories.map(c => <th key={c.id} style={{ fontSize:'0.7rem', whiteSpace:'nowrap' }}>{c.name}</th>)}
+                    <th>Given</th>
+                    <th>Received</th>
+                  </tr>
                 </thead>
                 <tbody>
-                  {empScoreSummaries.map(({ employee, weightedScore, scoreSeries }) => (
-                    <tr key={employee?.id}>
-                      <td style={{ color:'var(--white-soft)' }}>{employee?.last_name}, {employee?.first_name}</td>
-                      <td style={{ color:'var(--gold)', fontSize:'0.82rem' }}>{employee?.job_grade}</td>
-                      <td style={{ fontSize:'0.8rem', color:'var(--white-dim)' }}>{getPeerGroupLabel(employee?.job_grade)}</td>
-                      <td><ScoreBadge score={weightedScore}/></td>
-                      <td><Sparkline scores={scoreSeries}/></td>
-                    </tr>
-                  ))}
+                  {empScoreSummaries.map(({ employee, weightedScore }) => {
+                    const empCycles = cycles.filter(c => c.employee_id === employee?.id && c.status === 'submitted')
+                    const catScores = categories.map(cat => {
+                      const catQIds = questions.filter(q => q.category_id === cat.id).map(q => q.id)
+                      const catAnswers = answers.filter(a =>
+                        empCycles.some(c => c.id === a.cycle_id) && catQIds.includes(a.question_id) && a.score
+                      )
+                      return catAnswers.length > 0
+                        ? catAnswers.reduce((s, a) => s + a.score, 0) / catAnswers.length
+                        : null
+                    })
+                    const ss = sparkStats[employee?.id]
+                    return (
+                      <tr key={employee?.id}>
+                        <td style={{ color:'var(--white-soft)' }}>{employee?.last_name}, {employee?.first_name}</td>
+                        <td style={{ color:'var(--gold)', fontSize:'0.82rem' }}>{employee?.job_grade}</td>
+                        <td><ScoreBadge score={weightedScore}/></td>
+                        {catScores.map((avg, i) => (
+                          <td key={i} style={{ textAlign:'center' }}>
+                            {avg !== null
+                              ? <span style={{ fontSize:'0.8rem', fontWeight:600, color: avg>=4?'var(--green-bright)':avg>=3?'var(--gold)':'var(--red)' }}>{avg.toFixed(1)}</span>
+                              : <span style={{ color:'var(--white-dim)', fontSize:'0.78rem' }}>—</span>}
+                          </td>
+                        ))}
+                        <td style={{ fontSize:'0.82rem', color:'var(--gold)' }}>
+                          {ss ? `${ss.given}${ss.allotted > 0 ? ` / ${ss.allotted}` : ''}` : '—'}
+                        </td>
+                        <td style={{ fontSize:'0.82rem', color:'var(--green-bright)' }}>
+                          {ss ? ss.received : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
                   {empScoreSummaries.length === 0 && (
-                    <tr><td colSpan={5} style={{ color:'var(--white-dim)', textAlign:'center', padding:'20px' }}>No data yet.</td></tr>
+                    <tr><td colSpan={5 + categories.length} style={{ color:'var(--white-dim)', textAlign:'center', padding:'20px' }}>No data yet.</td></tr>
                   )}
                 </tbody>
               </table>

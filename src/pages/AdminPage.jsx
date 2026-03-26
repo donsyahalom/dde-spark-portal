@@ -5,7 +5,6 @@ import { MANAGEMENT_GRADES, FREQUENCY_OPTIONS, CARRIERS, LEADERBOARD_RANGE_OPTIO
 import { sendTestNotification, isBeforeGoLive } from '../lib/notificationService'
 import DashboardTab from '../components/DashboardTab'
 import TeamsTab from '../components/TeamsTab'
-import AdminTagsPanel from '../components/AdminTagsPanel'
 import PerformanceAdminPanel from '../components/PerformanceAdminPanel'
 
 // ── Hardcoded fallback lists (used only if DB is empty) ───────────────────────
@@ -762,7 +761,7 @@ export default function AdminPage() {
       )}
 
       <div className="tabs">
-        {[['dashboard','📊 Dashboard'],['employees','👥 Employees'],['add','➕ Add'],['batch','📋 Batch'],['teams','👷 Teams'],['tags','🏷️ Tags'],['settings','⚙️ Settings'],['lists','📝 Lists'],['reports','📊 Reports'],['performance','📋 Performance']].map(([t,label]) => (
+        {[['dashboard','📊 Dashboard'],['employees','👥 Employees'],['add','➕ Add'],['batch','📋 Batch'],['teams','👷 Teams'],['settings','⚙️ Settings'],['lists','📝 Lists'],['reports','📊 Reports'],['performance','📋 Performance']].map(([t,label]) => (
           <button key={t} className={`tab-btn${tab===t?' active':''}`} onClick={() => setTab(t)}>{label}</button>
         ))}
       </div>
@@ -780,10 +779,6 @@ export default function AdminPage() {
       {/* ── TAGS TAB ── */}
       {tab==='performance'&&(
         <PerformanceAdminPanel employees={employees} showMsg={showMsg} />
-      )}
-
-      {tab==='tags'&&(
-        <AdminTagsPanel employees={employees} showMsg={showMsg} />
       )}
 
       {/* ── EMPLOYEES TAB ── */}

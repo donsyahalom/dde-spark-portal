@@ -4,14 +4,13 @@ import { useAuth } from '../context/AuthContext'
 import { assignSparks } from '../lib/sparkHelpers'
 import { buildReason, getFrequencyLabel, getFrequencyResetDesc, getPeriodLabel, REASON_CATEGORIES as REASON_FALLBACK } from '../lib/constants'
 import { addDays, format, differenceInHours, differenceInDays } from 'date-fns'
-import TagsTab from '../components/TagsTab'
 
 const PER_PERSON_CAP = 2
 
 export default function EmployeePage() {
   const { currentUser, refreshUser } = useAuth()
-  const [pageTab, setPageTab] = useState('sparks')  // 'sparks' | 'tags'
-  const [me, setMe] = useState(currentUser)
+  const isManagement = me?.is_management || false
+  const hasList = me?.has_spark_list || false
   const [allEmployees, setAllEmployees] = useState([])
   const [employees, setEmployees] = useState([])
   const [settings, setSettings] = useState({ vesting_period_days: 30, spark_frequency: 'daily', min_redemption_amount: 20 })
@@ -38,7 +37,6 @@ export default function EmployeePage() {
 
   const isManagement = me?.is_management || false
   const hasList = me?.has_spark_list || false
-  const hasTagsAccess = me?.tags_access || false
 
   useEffect(() => { fetchAll() }, [])
 
@@ -55,9 +53,9 @@ export default function EmployeePage() {
     setSettings({ vesting_period_days: parseInt(sObj.vesting_period_days || 30), spark_frequency: freq, min_redemption_amount: parseInt(sObj.min_redemption_amount || 20) })
     const { data: resetTime } = await supabase.rpc('get_next_reset', { freq })
     setNextReset(resetTime)
-    // Fetch employees with tags fields for TagsTab
+    // Fetch employees
     const { data: emps } = await supabase.from('employees')
-      .select('id, first_name, last_name, job_title, tags_access, tags_role')
+      .select('id, first_name, last_name, job_title')
       .eq('is_admin', false).neq('id', currentUser.id).order('last_name')
     if (emps) setEmployees(emps)
     // Load live reason categories (fall back to hardcoded if DB is empty)
@@ -197,28 +195,6 @@ export default function EmployeePage() {
 
   return (
     <div className="fade-in">
-      {/* Page-level tab switcher — only show Tags tab when access granted */}
-      {hasTagsAccess && (
-        <div className="tabs" style={{ marginBottom: 20 }}>
-          <button className={`tab-btn${pageTab === 'sparks' ? ' active' : ''}`} onClick={() => setPageTab('sparks')}>
-            ✨ My Sparks
-          </button>
-          <button className={`tab-btn${pageTab === 'tags' ? ' active' : ''}`} onClick={() => setPageTab('tags')}>
-            🏷️ DDE Tags
-          </button>
-        </div>
-      )}
-
-      {/* ── TAGS PAGE ───────────────────────────────────────────────────── */}
-      {pageTab === 'tags' && hasTagsAccess && (
-        <TagsTab
-          currentUser={me}
-          employees={[...employees, { ...me, tags_access: me?.tags_access, tags_role: me?.tags_role }]}
-        />
-      )}
-
-      {/* ── SPARKS PAGE ─────────────────────────────────────────────────── */}
-      {pageTab === 'sparks' && (
       <div>
       {expiryAlert && (
         <div style={{background:'rgba(224,85,85,0.2)',border:'1px solid rgba(224,85,85,0.5)',borderRadius:'10px',padding:'12px 16px',marginBottom:'20px',color:'#ff8080',fontWeight:600,fontSize:'0.9rem'}}>
@@ -444,9 +420,7 @@ export default function EmployeePage() {
                 </>
               )}
         </div>
-      )}
       </div>
-      )}
     </div>
   )
 }
