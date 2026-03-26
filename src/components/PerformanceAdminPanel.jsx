@@ -99,6 +99,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
   const [answers, setAnswers]     = useState([])  // all answers
   const [profiles, setProfiles]   = useState([])
   const [gradeResponsibilities, setGradeResponsibilities] = useState([])  // { id, job_grade, responsibilities }
+  const [systemGrades, setSystemGrades] = useState([])  // all grades from custom_lists in sort order
   const [filterEmpId, setFilterEmpId] = useState('')
   const [editProfile, setEditProfile] = useState(null)  // { employee_id, responsibilities }
   const [profileText, setProfileText] = useState('')
@@ -119,6 +120,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
       { data: ansRows },
       { data: profRows },
       { data: gradeRespRows },
+      { data: gradeListRows },
       { data: teamsData },
       { data: membersData },
     ] = await Promise.all([
@@ -130,6 +132,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
       supabase.from('perf_answers').select('*, question:question_id(category_id)'),
       supabase.from('perf_employee_profiles').select('*'),
       supabase.from('perf_grade_responsibilities').select('*').order('job_grade'),
+      supabase.from('custom_lists').select('value, sort_order').eq('list_type', 'job_grade').order('sort_order'),
       supabase.from('teams').select('*').order('name'),
       supabase.from('team_members').select('team_id, employee_id, employees(id,first_name,last_name,job_grade,job_title)'),
     ])
@@ -139,6 +142,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
     setAnswers(ansRows || [])
     setProfiles(profRows || [])
     setGradeResponsibilities(gradeRespRows || [])
+    setSystemGrades((gradeListRows || []).map(r => r.value))
     setTeams(teamsData || [])
     setTeamMembers(membersData || [])
     setLoading(false)
@@ -885,12 +889,14 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                 </div>
               ) : (
                 <div>
-                  {/* Grade list — one row per unique grade in the employees list */}
+                  {/* Grade list — driven by the system custom_lists grade list, not employee data */}
                   {(() => {
-                    const allGrades = [...new Set(employees.map(e => e.job_grade).filter(Boolean))].sort()
+                    const allGrades = systemGrades.length > 0
+                      ? systemGrades
+                      : [...new Set(employees.map(e => e.job_grade).filter(Boolean))].sort()
                     if (allGrades.length === 0) return (
                       <div className="card" style={{ textAlign:'center', padding:'32px' }}>
-                        <p style={{ color:'var(--white-dim)' }}>No job grades found. Add employees with job grades first.</p>
+                        <p style={{ color:'var(--white-dim)' }}>No job grades found in the system lists. Add grades under Admin → Lists first.</p>
                       </div>
                     )
                     return (
@@ -902,10 +908,10 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                             <div key={grade} className="card" style={{
                               display:'flex', alignItems:'flex-start', justifyContent:'space-between',
                               gap:'16px', flexWrap:'wrap',
-                              borderColor: gradeResp ? 'rgba(240,192,64,0.25)' : 'rgba(255,255,255,0.08)'
+                              borderColor: gradeResp?.responsibilities ? 'rgba(240,192,64,0.25)' : 'rgba(255,255,255,0.08)'
                             }}>
                               <div style={{ flex:1, minWidth:0 }}>
-                                <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom: gradeResp ? '10px' : 0 }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom: gradeResp?.responsibilities ? '10px' : 0 }}>
                                   <span style={{
                                     fontFamily:'var(--font-display)', fontSize:'0.95rem',
                                     color:'var(--gold)', letterSpacing:'0.06em'
@@ -913,7 +919,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                                   <span style={{ fontSize:'0.75rem', color:'var(--white-dim)' }}>
                                     {empCount} employee{empCount !== 1 ? 's' : ''}
                                   </span>
-                                  {gradeResp ? (
+                                  {gradeResp?.responsibilities ? (
                                     <span style={{
                                       fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px',
                                       background:'rgba(94,232,138,0.1)', color:'var(--green-bright)',
@@ -947,7 +953,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                                   setGradeRespText(gradeResp?.responsibilities || '')
                                 }}
                               >
-                                {gradeResp ? 'Edit' : '+ Add'}
+                                {gradeResp?.responsibilities ? 'Edit' : '+ Add'}
                               </button>
                             </div>
                           )
