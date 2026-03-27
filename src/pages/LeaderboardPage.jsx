@@ -239,7 +239,7 @@ export default function LeaderboardPage() {
 
   return (
     <div className="fade-in">
-      <h1 className="page-title">✨ Spark Leaderboard</h1>
+      <h1 className="page-title">✨ Sparks Leaderboard</h1>
       <p className="page-subtitle">Recognizing excellence across the DDE team</p>
 
       <div style={{display:'flex',gap:'12px',alignItems:'center',marginBottom:'20px',flexWrap:'wrap'}}>
@@ -291,7 +291,7 @@ export default function LeaderboardPage() {
 
       {/* Transaction Log */}
       <div className="card">
-        <div className="card-title"><span className="icon">📋</span> Spark Activity Log</div>
+        <div className="card-title"><span className="icon">📋</span> Sparks Activity Log</div>
         <p style={{color:'var(--white-dim)',fontSize:'0.82rem',marginBottom:'16px'}}>
           {isAdmin ? 'View-only — admins cannot like sparks.' : 'Click ❤️ to like (and optionally match) a spark. You cannot like sparks you sent or received.'}
         </p>

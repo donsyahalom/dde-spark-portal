@@ -14,7 +14,9 @@ export default function Layout() {
   const isForeman = currentUser?.is_admin || /^[FP]/.test(grade) || grade === 'Owner'
 
   useEffect(() => {
-    if (!currentUser || currentUser.is_admin) { setHasDashboardAccess(false); return }
+    if (!currentUser) { setHasDashboardAccess(false); return }
+    // Admins always have dashboard access (they go to /admin but can also use /dashboard)
+    if (currentUser.is_admin) { setHasDashboardAccess(true); return }
     supabase.from('dashboard_access').select('access_level').eq('employee_id', currentUser.id).single()
       .then(({ data }) => setHasDashboardAccess(!!data))
   }, [currentUser])
@@ -32,7 +34,7 @@ export default function Layout() {
             <NavLink to="/my-sparks" className={({isActive})=>`nav-btn${isActive?' active':''}`}>&#x2728; My Sparks</NavLink>
           )}
           <NavLink to="/board" className={({isActive})=>`nav-btn${isActive?' active':''}`}>&#x1F4E2; Company</NavLink>
-          {hasDashboardAccess && !currentUser?.is_admin && (
+          {hasDashboardAccess && (
             <NavLink to="/dashboard" className={({isActive})=>`nav-btn${isActive?' active':''}`}>&#x1F4CA; Dashboard</NavLink>
           )}
           {isForeman && (
