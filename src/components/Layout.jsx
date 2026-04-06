@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 // UAT environment banner — only shows when VITE_ENV=UAT is set in Netlify env vars.
 // This variable is never set on the production site, so it never appears there.
 const IS_UAT = import.meta.env.VITE_ENV === 'UAT'
+console.log('IS_UAT:', IS_UAT, 'VITE_ENV:', import.meta.env.VITE_ENV)
 
 export default function Layout() {
   const { currentUser, logout } = useAuth()
