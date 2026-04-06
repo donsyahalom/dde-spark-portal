@@ -1,6 +1,17 @@
-// Supabase Edge Function: send-spark-summary
-// Deploy with: supabase functions deploy send-spark-summary
-// Requires env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY (or SENDGRID_API_KEY)
+// Supabase Edge Function: send-spark-summary  (UAT VERSION)
+//
+// This is the UAT-safe version of the email function.
+// All emails are redirected to RESEND_TEST_INBOX instead of the real employee address.
+// No real employees ever receive UAT test emails.
+//
+// Deploy to UAT project:
+//   supabase link --project-ref <UAT-project-ref>
+//   supabase functions deploy send-spark-summary
+//
+// Required secrets on the UAT Supabase project (set via Supabase dashboard or CLI):
+//   RESEND_API_KEY      — your Resend test/dev API key
+//   RESEND_TEST_INBOX   — the single address all UAT emails are redirected to
+//                         e.g. uat-sparks@dubaldo.com or your personal email
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -49,34 +60,33 @@ Deno.serve(async (req) => {
       .lte('created_at', periodEnd + 'T23:59:59')
       .order('created_at', { ascending: false })
 
-    const totalGiven = (given || []).reduce((s, t) => s + t.amount, 0)
+    const totalGiven    = (given    || []).reduce((s, t) => s + t.amount, 0)
     const totalReceived = (received || []).reduce((s, t) => s + t.amount, 0)
-    const totalSparks = (emp.vested_sparks || 0) + (emp.unvested_sparks || 0)
-    const remaining = emp.daily_sparks_remaining || 0
+    const totalSparks   = (emp.vested_sparks || 0) + (emp.unvested_sparks || 0)
+    const remaining     = emp.daily_sparks_remaining || 0
 
-    // Build HTML email
+    // ── UAT EMAIL INTERCEPT ──────────────────────────────────────────────────
+    // In UAT, ALL emails go to the test inbox — never to real employee addresses.
+    const resendKey   = Deno.env.get('RESEND_API_KEY')
+    const testInbox   = Deno.env.get('RESEND_TEST_INBOX')
+
+    if (!resendKey || !testInbox) {
+      const missing = [!resendKey && 'RESEND_API_KEY', !testInbox && 'RESEND_TEST_INBOX'].filter(Boolean)
+      console.warn(`UAT: missing env vars [${missing.join(', ')}] — logging only`)
+      return new Response(
+        JSON.stringify({ ok: true, note: `UAT log-only — missing: ${missing.join(', ')}`, employeeId }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     const html = buildEmailHTML({
       emp, given: given || [], received: received || [],
       totalGiven, totalReceived, totalSparks, remaining,
-      periodStart, periodEnd
+      periodStart, periodEnd,
+      isUat: true  // adds UAT banner inside the email body
     })
 
-    // Send via Resend (https://resend.com)
-    const resendKey = Deno.env.get('RESEND_API_KEY')
-    if (!resendKey) {
-      console.warn('No RESEND_API_KEY set — logging email instead')
-      // Log that email would have been sent
-      await supabase.from('email_log').insert({
-        employee_id: employeeId,
-        period_start: periodStart,
-        period_end: periodEnd,
-        sparks_given: totalGiven,
-        sparks_received: totalReceived,
-        sparks_remaining: remaining,
-      })
-      return new Response(JSON.stringify({ ok: true, note: 'logged only — no API key' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
-    }
-
+    // Send to test inbox, NOT emp.email
     const emailRes = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
@@ -84,28 +94,20 @@ Deno.serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'DDE Spark Portal <sparks@dubaldo.com>',
-        to: emp.email,
-        subject: `Your DDE Spark Summary — ${periodStart} to ${periodEnd}`,
+        from: 'DDE Spark Portal UAT <sparks@dubaldo.com>',
+        to:   testInbox,                             // ← redirected, never emp.email
+        subject: `[UAT] Spark Summary for ${emp.first_name} ${emp.last_name} — ${periodStart} to ${periodEnd}`,
         html,
       })
     })
 
     const emailData = await emailRes.json()
+    console.log(`UAT: email for ${emp.email} redirected → ${testInbox}`)
 
-    // Log the send
-    await supabase.from('email_log').insert({
-      employee_id: employeeId,
-      period_start: periodStart,
-      period_end: periodEnd,
-      sparks_given: totalGiven,
-      sparks_received: totalReceived,
-      sparks_remaining: remaining,
-    })
-
-    return new Response(JSON.stringify({ ok: true, emailData }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
+    return new Response(
+      JSON.stringify({ ok: true, uat: true, redirectedTo: testInbox, emailData }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
 
   } catch (e) {
     return new Response(JSON.stringify({ error: e.message }), {
@@ -114,7 +116,14 @@ Deno.serve(async (req) => {
   }
 })
 
-function buildEmailHTML({ emp, given, received, totalGiven, totalReceived, totalSparks, remaining, periodStart, periodEnd }) {
+// ── Email HTML Builder ────────────────────────────────────────────────────────
+
+function buildEmailHTML({ emp, given, received, totalGiven, totalReceived, totalSparks, remaining, periodStart, periodEnd, isUat = false }) {
+  const uatBanner = isUat ? `
+    <div style="background:#f59e0b;color:#000;text-align:center;padding:10px 16px;font-weight:bold;font-size:13px;letter-spacing:0.05em;">
+      ⚠️ UAT TEST EMAIL — Originally addressed to ${emp.email}
+    </div>` : ''
+
   const givenRows = given.map(t => `
     <tr>
       <td style="padding:8px 12px; border-bottom:1px solid #333;">${new Date(t.created_at).toLocaleDateString()}</td>
@@ -151,6 +160,7 @@ function buildEmailHTML({ emp, given, received, totalGiven, totalReceived, total
 </style></head>
 <body>
 <div class="container">
+  ${uatBanner}
   <div class="header">
     <div style="font-size:2rem;">✨</div>
     <h1>DDE Spark Summary</h1>

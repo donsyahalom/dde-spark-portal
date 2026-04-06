@@ -1,59 +1,75 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
-import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { supabase } from '../lib/supabase'
+
+// UAT environment banner — only shows when VITE_ENV=UAT is set in Netlify env vars.
+// This variable is never set on the production site, so it never appears there.
+const IS_UAT = import.meta.env.VITE_ENV === 'UAT'
 
 export default function Layout() {
   const { currentUser, logout } = useAuth()
   const navigate = useNavigate()
-  const [hasDashboardAccess, setHasDashboardAccess] = useState(false)
-  const handleLogout = () => { logout(); navigate('/login') }
 
-  // Foreman or above check
-  const grade = currentUser?.job_grade || ''
-  const isForeman = currentUser?.is_admin || /^[FP]/.test(grade) || grade === 'Owner'
-
-  useEffect(() => {
-    if (!currentUser) { setHasDashboardAccess(false); return }
-    // Admins always have dashboard access (they go to /admin but can also use /dashboard)
-    if (currentUser.is_admin) { setHasDashboardAccess(true); return }
-    supabase.from('dashboard_access').select('access_level').eq('employee_id', currentUser.id).single()
-      .then(({ data }) => setHasDashboardAccess(!!data))
-  }, [currentUser])
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
 
   return (
     <div className="app-layout">
+
+      {IS_UAT && (
+        <div style={{
+          background: '#f59e0b',
+          color: '#000',
+          textAlign: 'center',
+          padding: '6px 16px',
+          fontWeight: 'bold',
+          fontSize: '12px',
+          letterSpacing: '0.06em',
+          zIndex: 9999,
+        }}>
+          ⚠️ UAT ENVIRONMENT — Changes here do NOT affect production. Data resets every Sunday.
+        </div>
+      )}
+
       <header className="header">
         <div className="header-left">
-          <img src="/logo.png" alt="DDE Logo" className="header-logo" onError={e=>{e.target.style.display='none'}} />
-          <span className="header-title">DDE Sparks Portal</span>
+          <img src="/logo.png" alt="DDE Logo" className="header-logo"
+            onError={e => { e.target.style.display='none' }} />
+          <span className="header-title">
+            DDE Spark Portal{IS_UAT ? ' (UAT)' : ''}
+          </span>
         </div>
         <nav className="header-nav">
-          <NavLink to="/leaderboard" className={({isActive})=>`nav-btn${isActive?' active':''}`}>&#x1F3C6; Board</NavLink>
+          <NavLink to="/leaderboard" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
+            🏆 Board
+          </NavLink>
           {!currentUser?.is_admin && (
-            <NavLink to="/my-sparks" className={({isActive})=>`nav-btn${isActive?' active':''}`}>&#x2728; My Sparks</NavLink>
-          )}
-          <NavLink to="/board" className={({isActive})=>`nav-btn${isActive?' active':''}`}>&#x1F4E2; Company</NavLink>
-          {hasDashboardAccess && (
-            <NavLink to="/dashboard" className={({isActive})=>`nav-btn${isActive?' active':''}`}>&#x1F4CA; Dashboard</NavLink>
-          )}
-          {isForeman && (
-            <NavLink to="/performance" className={({isActive})=>`nav-btn${isActive?' active':''}`}>&#x1F4CB; Evals</NavLink>
+            <NavLink to="/my-sparks" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
+              ✨ My Sparks
+            </NavLink>
           )}
           {currentUser?.is_admin && (
-            <NavLink to="/admin" className={({isActive})=>`nav-btn${isActive?' active':''}`}>&#x2699;&#xFE0F; Admin</NavLink>
+            <NavLink to="/admin" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
+              ⚙️ Admin
+            </NavLink>
           )}
+          <NavLink to="/my-sparks" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}
+            style={currentUser?.is_admin ? {display:'none'} : {}}>
+          </NavLink>
           <span className="user-badge" style={{marginLeft:'8px'}}>
             {currentUser?.first_name}
             {!currentUser?.is_admin && (
-              <span className="spark-count">&#x2728; {(currentUser?.vested_sparks||0)+(currentUser?.unvested_sparks||0)}</span>
+              <span className="spark-count">✨ {(currentUser?.vested_sparks||0)+(currentUser?.unvested_sparks||0)}</span>
             )}
           </span>
-          <NavLink to="/change-password" className="nav-btn" style={{fontSize:'0.65rem'}}>&#x1F511;</NavLink>
+          <NavLink to="/change-password" className="nav-btn" style={{fontSize:'0.65rem'}}>🔑</NavLink>
           <button className="nav-btn logout" onClick={handleLogout}>Logout</button>
         </nav>
       </header>
-      <main className="main-content"><Outlet /></main>
+      <main className="main-content">
+        <Outlet />
+      </main>
     </div>
   )
 }

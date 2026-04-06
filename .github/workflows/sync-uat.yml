@@ -1,0 +1,41 @@
+name: Sync Prod → UAT (Weekly)
+
+on:
+  # Every Sunday at 2:00 AM Eastern Time (07:00 UTC)
+  schedule:
+    - cron: '0 7 * * 0'
+
+  # Also allows a manual trigger from the GitHub Actions tab
+  # (useful for forcing a sync before a UAT session)
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Sync production DB to UAT
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Supabase JS client
+        run: npm install @supabase/supabase-js
+
+      - name: Run sync script
+        env:
+          PROD_SUPABASE_URL:     ${{ secrets.PROD_SUPABASE_URL }}
+          PROD_SERVICE_ROLE_KEY: ${{ secrets.PROD_SERVICE_ROLE_KEY }}
+          UAT_SUPABASE_URL:      ${{ secrets.UAT_SUPABASE_URL }}
+          UAT_SERVICE_ROLE_KEY:  ${{ secrets.UAT_SERVICE_ROLE_KEY }}
+        run: node scripts/sync-prod-to-uat.js
+
+      - name: Report result
+        if: failure()
+        run: |
+          echo "::error::UAT sync failed. Check the logs above for details."
+          echo "You can re-run this job manually from the Actions tab."
