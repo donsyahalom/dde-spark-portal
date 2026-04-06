@@ -32,7 +32,7 @@ jobs:
           PROD_SERVICE_ROLE_KEY: ${{ secrets.PROD_SERVICE_ROLE_KEY }}
           UAT_SUPABASE_URL:      ${{ secrets.UAT_SUPABASE_URL }}
           UAT_SERVICE_ROLE_KEY:  ${{ secrets.UAT_SERVICE_ROLE_KEY }}
-        run: node scripts/sync-prod-to-uat.js
+       run: node --input-type=module < scripts/sync-prod-to-uat.js
 
       - name: Report result
         if: failure()
