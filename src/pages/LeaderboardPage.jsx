@@ -90,9 +90,9 @@ export default function LeaderboardPage() {
 
   const fetchEmployees = async () => {
     const { data } = await supabase.from('employees')
-      .select('id, first_name, last_name, vested_sparks, unvested_sparks, redeemed_sparks, job_title, job_grade')
+      .select('id, first_name, last_name, vested_sparks, unvested_sparks, redeemed_sparks, job_title, job_grade, is_optional')
       .eq('is_admin', false)
-    if (data) setEmployees(data)
+    if (data) setEmployees(data.filter(e => !e.is_optional))
     setLoading(false)
   }
 
