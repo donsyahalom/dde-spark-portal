@@ -9,6 +9,7 @@ import MessageBoardPage from './pages/MessageBoardPage'
 import UserDashboardPage from './pages/UserDashboardPage'
 import DashboardPage from './pages/DashboardPage'
 import PerformanceRatingPage from './pages/PerformanceRatingPage'
+import CompensationPage from './pages/CompensationPage'
 import Layout from './components/Layout'
 import './styles.css'
 
@@ -47,6 +48,7 @@ function AppRoutes() {
         <Route path="performance" element={<ForemanRoute><PerformanceRatingPage /></ForemanRoute>} />
         <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
         <Route path="dashboard" element={<ProtectedRoute><UserDashboardPage /></ProtectedRoute>} />
+        <Route path="compensation" element={<ProtectedRoute><CompensationPage /></ProtectedRoute>} />
       </Route>
       <Route path="*" element={<Navigate to="/leaderboard" />} />
     </Routes>

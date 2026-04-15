@@ -50,6 +50,11 @@ export default function Layout() {
               ✨ My Sparks
             </NavLink>
           )}
+          {!currentUser?.is_admin && (
+            <NavLink to="/compensation" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
+              💵 My Pay
+            </NavLink>
+          )}
           {currentUser?.is_admin && (
             <NavLink to="/admin" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
               ⚙️ Admin

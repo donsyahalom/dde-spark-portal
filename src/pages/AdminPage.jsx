@@ -128,7 +128,7 @@ export default function AdminPage() {
   const [batchRunning, setBatchRunning] = useState(false)
   const [batchErrors, setBatchErrors] = useState([])   // shown in UI after import
 
-  const emptyForm = { first_name:'', last_name:'', email:'', phone:'', carrier:'', initial_sparks:0, daily_accrual:0, job_grade:'', job_title:'', is_management:false, has_spark_list:false, is_optional:false, notify_email:true, notify_sms:false }
+  const emptyForm = { first_name:'', last_name:'', email:'', phone:'', carrier:'', initial_sparks:0, daily_accrual:0, job_grade:'', job_title:'', is_management:false, has_spark_list:false, is_optional:false, notify_email:true, notify_sms:false, wage_type:'hourly', wage_amount:'', has_company_vehicle:false, target_bonus_pct:'', bonus_share_pct:'', show_wage:null, show_range:null, show_target_bonus:null, show_bonus_share:null }
   const [form, setForm] = useState(emptyForm)
   const [batchText, setBatchText] = useState('')
   const [editEmp, setEditEmp] = useState(null)
@@ -508,6 +508,11 @@ export default function AdminPage() {
       has_spark_list: form.has_spark_list,
       is_optional: form.is_optional || false,
       notify_email: form.notify_email, notify_sms: form.notify_sms,
+      wage_type: form.wage_type || 'hourly',
+      wage_amount: parseFloat(form.wage_amount) || 0,
+      has_company_vehicle: form.has_company_vehicle || false,
+      target_bonus_pct: parseFloat(form.target_bonus_pct) || 0,
+      bonus_share_pct: parseFloat(form.bonus_share_pct) || 0,
     })
     setLoading(false)
     if (error) { showMsg('error', error.message); return }
@@ -550,6 +555,16 @@ export default function AdminPage() {
       daily_accrual: emp.daily_accrual || 0, job_grade: emp.job_grade || '', job_title: emp.job_title || '',
       is_management: emp.is_management || false, has_spark_list: emp.has_spark_list || false, is_optional: emp.is_optional || false,
       notify_email: emp.notify_email !== false, notify_sms: emp.notify_sms || false,
+      // compensation
+      wage_type: emp.wage_type || 'hourly',
+      wage_amount: emp.wage_amount ?? '',
+      has_company_vehicle: emp.has_company_vehicle || false,
+      target_bonus_pct: emp.target_bonus_pct ?? '',
+      bonus_share_pct: emp.bonus_share_pct ?? '',
+      show_wage: emp.show_wage,
+      show_range: emp.show_range,
+      show_target_bonus: emp.show_target_bonus,
+      show_bonus_share: emp.show_bonus_share,
     })
   }
 
@@ -567,6 +582,16 @@ export default function AdminPage() {
       has_spark_list: editValues.has_spark_list,
       is_optional: editValues.is_optional || false,
       notify_email: editValues.notify_email, notify_sms: editValues.notify_sms,
+      // compensation
+      wage_type: editValues.wage_type || 'hourly',
+      wage_amount: parseFloat(editValues.wage_amount) || 0,
+      has_company_vehicle: editValues.has_company_vehicle || false,
+      target_bonus_pct: parseFloat(editValues.target_bonus_pct) || 0,
+      bonus_share_pct: parseFloat(editValues.bonus_share_pct) || 0,
+      show_wage: editValues.show_wage,
+      show_range: editValues.show_range,
+      show_target_bonus: editValues.show_target_bonus,
+      show_bonus_share: editValues.show_bonus_share,
       updated_at: new Date().toISOString()
     }).eq('id', editEmp.id)
     const vd = newV - oldV, ud = newU - oldU
@@ -891,6 +916,32 @@ export default function AdminPage() {
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={form.is_optional} onChange={e=>setForm(f=>({...f,is_optional:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Optional</label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={form.notify_email} onChange={e=>setForm(f=>({...f,notify_email:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📧 Email Notifs</label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={form.notify_sms} onChange={e=>setForm(f=>({...f,notify_sms:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📱 SMS Notifs</label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={form.has_company_vehicle} onChange={e=>setForm(f=>({...f,has_company_vehicle:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 🚗 Company Vehicle</label>
+            </div>
+            {/* Compensation */}
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:'14px',marginBottom:'14px'}}>
+              <div style={{fontSize:'0.72rem',textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--gold)',marginBottom:'10px'}}>Compensation</div>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label className="form-label">Wage Type</label>
+                  <select className="form-select" value={form.wage_type} onChange={e=>setForm(f=>({...f,wage_type:e.target.value}))}>
+                    <option value="hourly">Hourly</option>
+                    <option value="salary">Salary (Annual)</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{form.wage_type==='hourly'?'Hourly Rate ($/hr)':'Annual Salary ($)'}</label>
+                  <input className="form-input" type="number" min="0" step="0.01" value={form.wage_amount} onChange={e=>setForm(f=>({...f,wage_amount:e.target.value}))} placeholder="0.00" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Target Bonus %</label>
+                  <input className="form-input" type="number" min="0" max="100" step="0.1" value={form.target_bonus_pct} onChange={e=>setForm(f=>({...f,target_bonus_pct:e.target.value}))} placeholder="0" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Bonus Share %</label>
+                  <input className="form-input" type="number" min="0" max="100" step="0.1" value={form.bonus_share_pct} onChange={e=>setForm(f=>({...f,bonus_share_pct:e.target.value}))} placeholder="0" />
+                </div>
+              </div>
             </div>
             <div className="alert alert-warning" style={{marginBottom:'12px'}}>Default password: <strong>spark123</strong></div>
             <button className="btn btn-gold" type="submit" disabled={loading}>{loading?'Adding...':'➕ Add Employee'}</button>
@@ -1272,6 +1323,71 @@ export default function AdminPage() {
             <button className="btn btn-gold btn-sm" onClick={saveSettings} disabled={loading}>{loading?'Saving...':'💾 Save Reminder Settings'}</button>
           </div>
 
+          {/* ── Compensation Settings ── */}
+          <div className="card" style={{marginBottom:'16px'}}>
+            <div className="card-title"><span className="icon">💵</span> Compensation Settings</div>
+            <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'14px'}}>
+              Global compensation and bonus settings. Per-employee visibility can be overridden on each employee record.
+            </p>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">🚗 Company Vehicle Rate ($/hr)</label>
+                <input className="form-input" type="number" min="0" step="0.01" value={settings.vehicle_hourly_rate||'7.74'} onChange={e=>setSettings(s=>({...s,vehicle_hourly_rate:e.target.value}))} />
+                <div style={{fontSize:'0.7rem',color:'var(--white-dim)',marginTop:'4px'}}>Added to hourly employees' effective compensation when they have a vehicle.</div>
+              </div>
+            </div>
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:'14px',marginTop:'4px',marginBottom:'14px'}}>
+              <div style={{fontSize:'0.72rem',textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--gold)',marginBottom:'10px'}}>Global Visibility Defaults</div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:'10px',marginBottom:'12px'}}>
+                {[
+                  ['show_wage','Show Wage','Show each employee their wage on the My Pay screen.'],
+                  ['show_range','Show Range','Show the compensation range for the employee\'s job grade.'],
+                  ['show_target_bonus','Show Target Bonus','Show target bonus % and dollar amount.'],
+                  ['show_bonus_share','Show Bonus Share','Show bonus share % and calculated amount.'],
+                ].map(([key,label,desc])=>(
+                  <label key={key} style={{display:'flex',alignItems:'flex-start',gap:'8px',cursor:'pointer',padding:'10px 12px',background:settings[key]==='true'?'rgba(240,192,64,0.08)':'rgba(0,0,0,0.2)',borderRadius:'8px',border:`1px solid ${settings[key]==='true'?'rgba(240,192,64,0.3)':'var(--border)'}`}}>
+                    <input type="checkbox" checked={settings[key]==='true'||settings[key]===true} onChange={e=>setSettings(s=>({...s,[key]:e.target.checked?'true':'false'}))} style={{accentColor:'var(--gold)',marginTop:'2px',flexShrink:0}} />
+                    <div>
+                      <div style={{fontSize:'0.85rem',fontWeight:600,color:'var(--white-soft)'}}>{label}</div>
+                      <div style={{fontSize:'0.72rem',color:'var(--white-dim)',marginTop:'2px',lineHeight:1.4}}>{desc}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:'14px',marginBottom:'14px'}}>
+              <div style={{fontSize:'0.72rem',textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--gold)',marginBottom:'10px'}}>Bonus Pool Variables</div>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label className="form-label">Total Revenue ($)</label>
+                  <input className="form-input" type="number" min="0" step="1" value={settings.total_revenue||'0'} onChange={e=>setSettings(s=>({...s,total_revenue:e.target.value}))} placeholder="e.g. 6000000" />
+                  <div style={{fontSize:'0.7rem',color:'var(--white-dim)',marginTop:'4px'}}>Annual company revenue. Used to calculate bonus share amounts.</div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Target Minimum ($)</label>
+                  <input className="form-input" type="number" min="0" step="1" value={settings.target_minimum||'0'} onChange={e=>setSettings(s=>({...s,target_minimum:e.target.value}))} placeholder="e.g. 5000000" />
+                  <div style={{fontSize:'0.7rem',color:'var(--white-dim)',marginTop:'4px'}}>Revenue threshold at which bonus sharing kicks in.</div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Target Bonus Share %</label>
+                  <input className="form-input" type="number" min="0" max="100" step="0.1" value={settings.target_bonus_share_pct||'0'} onChange={e=>setSettings(s=>({...s,target_bonus_share_pct:e.target.value}))} placeholder="e.g. 10" />
+                  <div style={{fontSize:'0.7rem',color:'var(--white-dim)',marginTop:'4px'}}>
+                    % of revenue above the target minimum shared as bonuses.
+                    {(() => {
+                      const rev = parseFloat(settings.total_revenue||0)
+                      const min = parseFloat(settings.target_minimum||0)
+                      const pct = parseFloat(settings.target_bonus_share_pct||0)
+                      const pool = Math.max(0, (rev - min) * (pct / 100))
+                      if (pool > 0) return <span style={{color:'var(--gold)',fontWeight:600}}> Pool: ${pool.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                      return null
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button className="btn btn-gold btn-sm" onClick={saveSettings} disabled={loading}>{loading?'Saving...':'💾 Save Compensation Settings'}</button>
+          </div>
+
           <div className="card">
             <div className="card-title"><span className="icon">🧪</span> Test Notifications</div>
             <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'14px'}}>Send a test email or SMS to any employee. Works even before go-live.</p>
@@ -1434,6 +1550,55 @@ export default function AdminPage() {
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.is_optional||false} onChange={e=>setEditValues(v=>({...v,is_optional:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Optional</label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.notify_email!==false} onChange={e=>setEditValues(v=>({...v,notify_email:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📧 Email</label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.notify_sms||false} onChange={e=>setEditValues(v=>({...v,notify_sms:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📱 SMS</label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.has_company_vehicle||false} onChange={e=>setEditValues(v=>({...v,has_company_vehicle:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 🚗 Company Vehicle</label>
+            </div>
+            {/* Compensation */}
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:'14px',marginBottom:'14px'}}>
+              <div style={{fontSize:'0.72rem',textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--gold)',marginBottom:'10px'}}>💵 Compensation</div>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label className="form-label">Wage Type</label>
+                  <select className="form-select" value={editValues.wage_type||'hourly'} onChange={e=>setEditValues(v=>({...v,wage_type:e.target.value}))}>
+                    <option value="hourly">Hourly</option>
+                    <option value="salary">Salary (Annual)</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{editValues.wage_type==='salary'?'Annual Salary ($)':'Hourly Rate ($/hr)'}</label>
+                  <input className="form-input" type="number" min="0" step="0.01" value={editValues.wage_amount??''} onChange={e=>setEditValues(v=>({...v,wage_amount:e.target.value}))} placeholder="0.00" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Target Bonus %</label>
+                  <input className="form-input" type="number" min="0" max="100" step="0.1" value={editValues.target_bonus_pct??''} onChange={e=>setEditValues(v=>({...v,target_bonus_pct:e.target.value}))} placeholder="0" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Bonus Share %</label>
+                  <input className="form-input" type="number" min="0" max="100" step="0.1" value={editValues.bonus_share_pct??''} onChange={e=>setEditValues(v=>({...v,bonus_share_pct:e.target.value}))} placeholder="0" />
+                </div>
+              </div>
+              {/* Per-employee visibility overrides */}
+              <div style={{marginTop:'12px'}}>
+                <div style={{fontSize:'0.72rem',color:'var(--white-dim)',marginBottom:'8px'}}>Visibility overrides (null = use global setting)</div>
+                <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
+                  {[
+                    ['show_wage','Show Wage'],
+                    ['show_range','Show Range'],
+                    ['show_target_bonus','Show Target Bonus'],
+                    ['show_bonus_share','Show Bonus Share'],
+                  ].map(([key, label]) => (
+                    <div key={key} style={{display:'flex',flexDirection:'column',gap:'2px',minWidth:'110px'}}>
+                      <span style={{fontSize:'0.72rem',color:'var(--white-dim)'}}>{label}</span>
+                      <select className="form-select" style={{fontSize:'0.78rem',padding:'4px 8px'}}
+                        value={editValues[key]===null||editValues[key]===undefined?'null':editValues[key]?'true':'false'}
+                        onChange={e=>setEditValues(v=>({...v,[key]:e.target.value==='null'?null:e.target.value==='true'}))}>
+                        <option value="null">Inherit (global)</option>
+                        <option value="true">On</option>
+                        <option value="false">Off</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
             <div style={{display:'flex',gap:'10px'}}>
               <button className="btn btn-gold" onClick={saveEdit} disabled={loading}>{loading?'Saving...':'💾 Save'}</button>

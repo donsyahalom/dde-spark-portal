@@ -111,6 +111,12 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
   const [workdayOverride, setWorkdayOverride] = useState({})  // cycleId -> override value string
   const [systemGrades, setSystemGrades] = useState([])  // all grades from custom_lists in sort order
 
+  // ── Grade compensation ────────────────────────────────────────────────────
+  const [gradeCompensation, setGradeCompensation] = useState([])  // { job_grade, wage_type, wage_min, wage_max, target_bonus_pct, bonus_share_pct }
+  const [editGradeComp, setEditGradeComp] = useState(null)  // { job_grade }
+  const [gradeCompValues, setGradeCompValues] = useState({ wage_type:'hourly', wage_min:'', wage_max:'', target_bonus_pct:'', bonus_share_pct:'' })
+  const [gradeCompSaving, setGradeCompSaving] = useState(false)
+
   // ── Load all data ─────────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -123,6 +129,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
         { data: profRows },
         { data: gradeRespRows },
         { data: gradeListRows },
+        { data: gradeCompData },
         { data: teamsData },
         { data: membersData },
         { data: sparkTxns },
@@ -137,6 +144,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
         supabase.from('perf_employee_profiles').select('*'),
         supabase.from('perf_grade_responsibilities').select('*').order('job_grade'),
         supabase.from('custom_lists').select('value, sort_order').eq('list_type', 'job_grade').order('sort_order'),
+        supabase.from('perf_grade_compensation').select('*').order('job_grade'),
         supabase.from('teams').select('*').order('name'),
         supabase.from('team_members').select('team_id, employee_id, employees(id,first_name,last_name,job_grade,job_title)'),
         supabase.from('spark_transactions').select('from_employee_id, to_employee_id, amount, reason, transaction_type').eq('transaction_type', 'assign'),
@@ -149,6 +157,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
       setProfiles(profRows || [])
       setGradeResponsibilities(gradeRespRows || [])
       setSystemGrades((gradeListRows || []).map(r => r.value))
+      setGradeCompensation(gradeCompData || [])
       setTeams(teamsData || [])
       setTeamMembers(membersData || [])
 
@@ -279,6 +288,31 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
     })
     setEditGradeResp(null); setGradeRespText(''); setGradeRespSaving(false)
     showMsg('Grade responsibilities saved')
+  }
+
+  // ── Grade compensation ─────────────────────────────────────────────────────
+  const saveGradeComp = async () => {
+    if (!editGradeComp) return
+    setGradeCompSaving(true)
+    const payload = {
+      job_grade: editGradeComp.job_grade,
+      wage_type: gradeCompValues.wage_type || 'hourly',
+      wage_min: parseFloat(gradeCompValues.wage_min) || 0,
+      wage_max: parseFloat(gradeCompValues.wage_max) || 0,
+      target_bonus_pct: parseFloat(gradeCompValues.target_bonus_pct) || 0,
+      bonus_share_pct: parseFloat(gradeCompValues.bonus_share_pct) || 0,
+      updated_at: new Date().toISOString(),
+      updated_by: currentUser.id,
+    }
+    await supabase.from('perf_grade_compensation').upsert(payload, { onConflict: 'job_grade' })
+    setGradeCompensation(prev => {
+      const idx = prev.findIndex(r => r.job_grade === editGradeComp.job_grade)
+      return idx >= 0 ? prev.map((r, i) => i === idx ? payload : r) : [...prev, payload]
+    })
+    setEditGradeComp(null)
+    setGradeCompValues({ wage_type:'hourly', wage_min:'', wage_max:'', target_bonus_pct:'', bonus_share_pct:'' })
+    setGradeCompSaving(false)
+    showMsg('Grade compensation saved')
   }
 
   // ── Profile (employee-specific responsibilities) ───────────────────────────
@@ -1037,11 +1071,12 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
           {profilesSubTab === 'grades' && (
             <div>
               <p style={{ color:'var(--white-dim)', fontSize:'0.85rem', marginBottom:'16px', lineHeight:1.6 }}>
-                Set standard responsibilities for each job grade. These are automatically shown to the foreman when rating any employee of that grade.
+                Set standard responsibilities and compensation ranges for each job grade.
               </p>
 
-              {editGradeResp ? (
-                <div className="card" style={{ maxWidth:'640px' }}>
+              {/* ── Edit responsibilities form ── */}
+              {editGradeResp && (
+                <div className="card" style={{ maxWidth:'640px', marginBottom:'16px' }}>
                   <div className="card-title">
                     Edit Responsibilities — Grade <span style={{ color:'var(--gold)' }}>{editGradeResp.job_grade}</span>
                   </div>
@@ -1063,9 +1098,70 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                     <button className="btn btn-outline btn-sm" onClick={() => { setEditGradeResp(null); setGradeRespText('') }}>Cancel</button>
                   </div>
                 </div>
-              ) : (
+              )}
+
+              {/* ── Edit compensation form ── */}
+              {editGradeComp && (
+                <div className="card" style={{ maxWidth:'640px', marginBottom:'16px' }}>
+                  <div className="card-title">
+                    Edit Compensation — Grade <span style={{ color:'var(--gold)' }}>{editGradeComp.job_grade}</span>
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'12px' }}>
+                    <div>
+                      <label className="form-label">Wage Type</label>
+                      <select className="form-select" value={gradeCompValues.wage_type}
+                        onChange={e => setGradeCompValues(v => ({ ...v, wage_type: e.target.value }))}>
+                        <option value="hourly">Hourly</option>
+                        <option value="salary">Salary (Annual)</option>
+                      </select>
+                    </div>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
+                      <div>
+                        <label className="form-label">
+                          {gradeCompValues.wage_type === 'hourly' ? 'Min ($/hr)' : 'Min ($/yr)'}
+                        </label>
+                        <input type="number" min="0" step="0.01" className="form-input"
+                          value={gradeCompValues.wage_min}
+                          onChange={e => setGradeCompValues(v => ({ ...v, wage_min: e.target.value }))}
+                          placeholder="0.00" />
+                      </div>
+                      <div>
+                        <label className="form-label">
+                          {gradeCompValues.wage_type === 'hourly' ? 'Max ($/hr)' : 'Max ($/yr)'}
+                        </label>
+                        <input type="number" min="0" step="0.01" className="form-input"
+                          value={gradeCompValues.wage_max}
+                          onChange={e => setGradeCompValues(v => ({ ...v, wage_max: e.target.value }))}
+                          placeholder="0.00" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="form-label">Target Bonus %</label>
+                      <input type="number" min="0" max="100" step="0.1" className="form-input"
+                        value={gradeCompValues.target_bonus_pct}
+                        onChange={e => setGradeCompValues(v => ({ ...v, target_bonus_pct: e.target.value }))}
+                        placeholder="0" />
+                    </div>
+                    <div>
+                      <label className="form-label">Bonus Share %</label>
+                      <input type="number" min="0" max="100" step="0.1" className="form-input"
+                        value={gradeCompValues.bonus_share_pct}
+                        onChange={e => setGradeCompValues(v => ({ ...v, bonus_share_pct: e.target.value }))}
+                        placeholder="0" />
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', gap:'10px', marginTop:'4px' }}>
+                    <button className="btn btn-gold btn-sm" disabled={gradeCompSaving} onClick={saveGradeComp}>
+                      {gradeCompSaving ? 'Saving…' : 'Save Compensation'}
+                    </button>
+                    <button className="btn btn-outline btn-sm" onClick={() => { setEditGradeComp(null) }}>Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Grade cards (list) ── */}
+              {!editGradeResp && !editGradeComp && (
                 <div>
-                  {/* Grade list — driven by the system custom_lists grade list, not employee data */}
                   {(() => {
                     const allGrades = systemGrades.length > 0
                       ? systemGrades
@@ -1079,15 +1175,17 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                       <div style={{ display:'grid', gap:'10px' }}>
                         {allGrades.map(grade => {
                           const gradeResp = gradeResponsibilities.find(r => r.job_grade === grade)
+                          const gradeComp = gradeCompensation.find(r => r.job_grade === grade)
                           const empCount = employees.filter(e => e.job_grade === grade).length
+                          const hasComp = gradeComp && (gradeComp.wage_min > 0 || gradeComp.wage_max > 0)
                           return (
                             <div key={grade} className="card" style={{
-                              display:'flex', alignItems:'flex-start', justifyContent:'space-between',
                               gap:'16px', flexWrap:'wrap',
                               borderColor: gradeResp?.responsibilities ? 'rgba(240,192,64,0.25)' : 'rgba(255,255,255,0.08)'
                             }}>
-                              <div style={{ flex:1, minWidth:0 }}>
-                                <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom: gradeResp?.responsibilities ? '10px' : 0 }}>
+                              {/* Header row */}
+                              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'10px' }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
                                   <span style={{
                                     fontFamily:'var(--font-display)', fontSize:'0.95rem',
                                     color:'var(--gold)', letterSpacing:'0.06em'
@@ -1095,42 +1193,85 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                                   <span style={{ fontSize:'0.75rem', color:'var(--white-dim)' }}>
                                     {empCount} employee{empCount !== 1 ? 's' : ''}
                                   </span>
-                                  {gradeResp?.responsibilities ? (
-                                    <span style={{
-                                      fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px',
-                                      background:'rgba(94,232,138,0.1)', color:'var(--green-bright)',
-                                      border:'1px solid rgba(94,232,138,0.3)'
-                                    }}>✓ Set</span>
-                                  ) : (
-                                    <span style={{
-                                      fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px',
-                                      background:'rgba(255,255,255,0.05)', color:'var(--white-dim)',
-                                      border:'1px solid rgba(255,255,255,0.1)'
-                                    }}>Not set</span>
+                                  {gradeResp?.responsibilities
+                                    ? <span style={{ fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px', background:'rgba(94,232,138,0.1)', color:'var(--green-bright)', border:'1px solid rgba(94,232,138,0.3)' }}>✓ Resp</span>
+                                    : <span style={{ fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px', background:'rgba(255,255,255,0.05)', color:'var(--white-dim)', border:'1px solid rgba(255,255,255,0.1)' }}>No Resp</span>
+                                  }
+                                  {hasComp
+                                    ? <span style={{ fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px', background:'rgba(240,192,64,0.1)', color:'var(--gold)', border:'1px solid rgba(240,192,64,0.3)' }}>✓ Comp</span>
+                                    : <span style={{ fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px', background:'rgba(255,255,255,0.05)', color:'var(--white-dim)', border:'1px solid rgba(255,255,255,0.1)' }}>No Comp</span>
+                                  }
+                                </div>
+                                <div style={{ display:'flex', gap:'6px' }}>
+                                  <button className="btn btn-outline btn-sm" onClick={() => {
+                                    setEditGradeResp({ job_grade: grade })
+                                    setGradeRespText(gradeResp?.responsibilities || '')
+                                  }}>
+                                    {gradeResp?.responsibilities ? '✏️ Resp' : '+ Resp'}
+                                  </button>
+                                  <button className="btn btn-outline btn-sm" onClick={() => {
+                                    setEditGradeComp({ job_grade: grade })
+                                    setGradeCompValues({
+                                      wage_type: gradeComp?.wage_type || 'hourly',
+                                      wage_min: gradeComp?.wage_min ?? '',
+                                      wage_max: gradeComp?.wage_max ?? '',
+                                      target_bonus_pct: gradeComp?.target_bonus_pct ?? '',
+                                      bonus_share_pct: gradeComp?.bonus_share_pct ?? '',
+                                    })
+                                  }}>
+                                    {hasComp ? '✏️ Comp' : '+ Comp'}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Responsibilities preview */}
+                              {gradeResp?.responsibilities && (
+                                <div style={{
+                                  fontSize:'0.8rem', color:'var(--white-dim)', lineHeight:1.6,
+                                  whiteSpace:'pre-wrap', marginTop:'8px',
+                                  overflow:'hidden', maxHeight:'4.8em',
+                                  maskImage:'linear-gradient(to bottom, black 60%, transparent 100%)',
+                                  WebkitMaskImage:'linear-gradient(to bottom, black 60%, transparent 100%)'
+                                }}>
+                                  {gradeResp.responsibilities}
+                                </div>
+                              )}
+
+                              {/* Compensation summary */}
+                              {hasComp && (
+                                <div style={{
+                                  marginTop:'8px', display:'flex', gap:'16px', flexWrap:'wrap',
+                                  padding:'10px 14px', borderRadius:'8px',
+                                  background:'rgba(240,192,64,0.06)', border:'1px solid rgba(240,192,64,0.15)'
+                                }}>
+                                  <div>
+                                    <span style={{ fontSize:'0.72rem', color:'var(--white-dim)' }}>Type</span>
+                                    <div style={{ fontSize:'0.85rem', color:'var(--gold)', fontWeight:600 }}>
+                                      {gradeComp.wage_type === 'hourly' ? 'Hourly' : 'Salary'}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <span style={{ fontSize:'0.72rem', color:'var(--white-dim)' }}>Range</span>
+                                    <div style={{ fontSize:'0.85rem', color:'var(--white-soft)', fontWeight:600 }}>
+                                      {gradeComp.wage_type === 'hourly'
+                                        ? `$${gradeComp.wage_min}/hr – $${gradeComp.wage_max}/hr`
+                                        : `$${Number(gradeComp.wage_min).toLocaleString()} – $${Number(gradeComp.wage_max).toLocaleString()}/yr`}
+                                    </div>
+                                  </div>
+                                  {gradeComp.target_bonus_pct > 0 && (
+                                    <div>
+                                      <span style={{ fontSize:'0.72rem', color:'var(--white-dim)' }}>Target Bonus</span>
+                                      <div style={{ fontSize:'0.85rem', color:'var(--green-bright)', fontWeight:600 }}>{gradeComp.target_bonus_pct}%</div>
+                                    </div>
+                                  )}
+                                  {gradeComp.bonus_share_pct > 0 && (
+                                    <div>
+                                      <span style={{ fontSize:'0.72rem', color:'var(--white-dim)' }}>Bonus Share</span>
+                                      <div style={{ fontSize:'0.85rem', color:'var(--green-bright)', fontWeight:600 }}>{gradeComp.bonus_share_pct}%</div>
+                                    </div>
                                   )}
                                 </div>
-                                {gradeResp?.responsibilities && (
-                                  <div style={{
-                                    fontSize:'0.8rem', color:'var(--white-dim)', lineHeight:1.6,
-                                    whiteSpace:'pre-wrap',
-                                    overflow:'hidden', maxHeight:'4.8em',
-                                    maskImage:'linear-gradient(to bottom, black 60%, transparent 100%)',
-                                    WebkitMaskImage:'linear-gradient(to bottom, black 60%, transparent 100%)'
-                                  }}>
-                                    {gradeResp.responsibilities}
-                                  </div>
-                                )}
-                              </div>
-                              <button
-                                className="btn btn-outline btn-sm"
-                                style={{ flexShrink:0 }}
-                                onClick={() => {
-                                  setEditGradeResp({ job_grade: grade })
-                                  setGradeRespText(gradeResp?.responsibilities || '')
-                                }}
-                              >
-                                {gradeResp?.responsibilities ? 'Edit' : '+ Add'}
-                              </button>
+                              )}
                             </div>
                           )
                         })}
