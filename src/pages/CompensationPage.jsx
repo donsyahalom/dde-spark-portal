@@ -2,6 +2,31 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
+// ── Grade code → full name ─────────────────────────────────────────────────
+function expandGrade(code) {
+  if (!code) return ''
+  const prefixMap = {
+    Pre:  'Pre-Apprentice',
+    A:    'Apprentice',
+    J:    'Journeyman',
+    F:    'Foreman',
+    P:    'Project Manager',
+    O:    'Office',
+  }
+  // Special cases
+  if (/^Owner$/i.test(code)) return 'Owner'
+  // Match prefix + number, e.g. "J3", "Pre1", "P4"
+  const m = code.match(/^([A-Za-z]+)(\d+)$/)
+  if (m) {
+    const prefix = m[1]
+    const num = m[2]
+    // Try exact prefix first, then uppercase
+    const label = prefixMap[prefix] || prefixMap[prefix.charAt(0).toUpperCase() + prefix.slice(1).toLowerCase()] || prefix
+    return `${label} ${num}`
+  }
+  return code
+}
+
 // ── Format helpers ────────────────────────────────────────────────────────────
 function fmt$(n, decimals = 0) {
   if (!n && n !== 0) return '—'
@@ -183,37 +208,62 @@ export default function CompensationPage() {
   }
 
   const isViewingOwn = viewGradeOffset === 0
+  const arrows = '→'.repeat(viewGradeOffset)
   const viewingLabel = isViewingOwn
-    ? `My Grade — ${viewGrade}`
-    : `${viewGrade} (+${viewGradeOffset} level${viewGradeOffset !== 1 ? 's' : ''})`
+    ? `My Grade — ${viewGrade} (${expandGrade(viewGrade)})`
+    : `${arrows}${viewGrade} — ${expandGrade(viewGrade)}`
 
   return (
     <div className="fade-in">
       <h1 className="page-title">💵 My Pay & Compensation</h1>
-      <p className="page-subtitle">
-        Your current grade: <strong style={{ color: 'var(--gold)' }}>{emp?.job_grade || '—'}</strong>
-        {emp?.job_title && <span style={{ color: 'var(--white-dim)' }}> · {emp.job_title}</span>}
-      </p>
+
+      {/* ── Prominent grade display ── */}
+      <div style={{
+        marginBottom: '24px', padding: '20px 24px', borderRadius: '12px',
+        background: 'rgba(240,192,64,0.07)', border: '1px solid rgba(240,192,64,0.3)',
+      }}>
+        <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--white-dim)', marginBottom: '6px' }}>
+          Your Current Grade
+        </div>
+        <div style={{
+          fontFamily: 'var(--font-display)', fontSize: '2.4rem', fontWeight: 700,
+          color: 'var(--gold)', letterSpacing: '0.06em', lineHeight: 1.1,
+        }}>
+          {emp?.job_grade || '—'}
+        </div>
+        <div style={{ fontSize: '1.15rem', color: 'var(--white-soft)', marginTop: '6px', fontWeight: 500 }}>
+          {expandGrade(emp?.job_grade)}
+        </div>
+        {emp?.job_title && (
+          <div style={{ fontSize: '0.88rem', color: 'var(--white-dim)', marginTop: '4px' }}>{emp.job_title}</div>
+        )}
+      </div>
 
       {/* ── Grade level toggle ── */}
       {maxOffset > 0 && (
         <div style={{
           marginBottom: '20px', padding: '12px 16px', borderRadius: '10px',
           background: 'rgba(240,192,64,0.06)', border: '1px solid rgba(240,192,64,0.2)',
-          display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap'
+          display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap'
         }}>
           <span style={{ fontSize: '0.82rem', color: 'var(--white-dim)', marginRight: '4px' }}>View level:</span>
-          {[0, 1, 2].filter(o => o <= maxOffset).map(o => (
-            <button
-              key={o}
-              className={`btn ${viewGradeOffset === o ? 'btn-gold' : 'btn-outline'} btn-sm`}
-              onClick={() => setViewGradeOffset(o)}
-            >
-              {o === 0
-                ? `My Grade (${emp?.job_grade})`
-                : `+${o} — ${systemGrades[Math.min(myGradeIdx + o, systemGrades.length - 1)]}`}
-            </button>
-          ))}
+          {[0, 1, 2].filter(o => o <= maxOffset).map(o => {
+            const targetGrade = o === 0 ? emp?.job_grade : systemGrades[Math.min(myGradeIdx + o, systemGrades.length - 1)]
+            const arrows = '→'.repeat(o)
+            const label = o === 0
+              ? `${emp?.job_grade} — ${expandGrade(emp?.job_grade)}`
+              : `${arrows}${targetGrade} — ${expandGrade(targetGrade)}`
+            return (
+              <button
+                key={o}
+                className={`btn ${viewGradeOffset === o ? 'btn-gold' : 'btn-outline'} btn-sm`}
+                onClick={() => setViewGradeOffset(o)}
+                style={{ fontFamily: o > 0 ? 'var(--font-display)' : undefined, letterSpacing: o > 0 ? '0.04em' : undefined }}
+              >
+                {label}
+              </button>
+            )
+          })}
         </div>
       )}
 
