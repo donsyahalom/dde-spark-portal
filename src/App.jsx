@@ -11,6 +11,16 @@ import DashboardPage from './pages/DashboardPage'
 import PerformanceRatingPage from './pages/PerformanceRatingPage'
 import CompensationPage from './pages/CompensationPage'
 import Layout from './components/Layout'
+// Ops (financial operations) dashboard — nested under /ops
+import OpsLayout from './components/ops/OpsLayout'
+import OpsOverviewPage from './pages/ops/OpsOverviewPage'
+import OpsPnlPage from './pages/ops/OpsPnlPage'
+import OpsJobsPage from './pages/ops/OpsJobsPage'
+import OpsCashflowPage from './pages/ops/OpsCashflowPage'
+import OpsArPage from './pages/ops/OpsArPage'
+import OpsApPage from './pages/ops/OpsApPage'
+import OpsKpisPage from './pages/ops/OpsKpisPage'
+import OpsPermissionsPage from './pages/ops/OpsPermissionsPage'
 import './styles.css'
 
 function ProtectedRoute({ children, adminOnly = false }) {
@@ -33,6 +43,17 @@ function ForemanRoute({ children }) {
   return children
 }
 
+// Guard: ops/financial dashboard — admins and owners only.
+// When the server-side `ops_access` RLS table is wired we'll replace
+// this with a per-row lookup; for now keep the gate client-side.
+function OpsRoute({ children }) {
+  const { currentUser } = useAuth()
+  const grade = currentUser?.job_grade || ''
+  const canSeeOps = currentUser?.is_admin || grade === 'Owner'
+  if (!canSeeOps) return <Navigate to="/leaderboard" />
+  return children
+}
+
 function AppRoutes() {
   const { currentUser } = useAuth()
   return (
@@ -49,6 +70,17 @@ function AppRoutes() {
         <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
         <Route path="dashboard" element={<ProtectedRoute><UserDashboardPage /></ProtectedRoute>} />
         <Route path="compensation" element={<ProtectedRoute><CompensationPage /></ProtectedRoute>} />
+        {/* Ops (financial operations) dashboard — admin/Owner only */}
+        <Route path="ops" element={<OpsRoute><OpsLayout /></OpsRoute>}>
+          <Route index element={<OpsOverviewPage />} />
+          <Route path="pnl"         element={<OpsPnlPage />} />
+          <Route path="jobs"        element={<OpsJobsPage />} />
+          <Route path="cashflow"    element={<OpsCashflowPage />} />
+          <Route path="ar"          element={<OpsArPage />} />
+          <Route path="ap"          element={<OpsApPage />} />
+          <Route path="kpis"        element={<OpsKpisPage />} />
+          <Route path="permissions" element={<OpsPermissionsPage />} />
+        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/leaderboard" />} />
     </Routes>

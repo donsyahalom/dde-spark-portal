@@ -15,6 +15,9 @@ export default function Layout() {
     navigate('/login')
   }
 
+  // Same rule as OpsRoute in App.jsx — admin or Owner.
+  const canSeeOps = currentUser?.is_admin || currentUser?.job_grade === 'Owner'
+
   return (
     <div className="app-layout">
 
@@ -53,6 +56,11 @@ export default function Layout() {
           {!currentUser?.is_admin && (
             <NavLink to="/compensation" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
               💵 My Pay
+            </NavLink>
+          )}
+          {canSeeOps && (
+            <NavLink to="/ops" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
+              📊 Ops
             </NavLink>
           )}
           {currentUser?.is_admin && (
