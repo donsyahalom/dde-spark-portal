@@ -20,6 +20,7 @@ import OpsCashflowPage from './pages/ops/OpsCashflowPage'
 import OpsArPage from './pages/ops/OpsArPage'
 import OpsApPage from './pages/ops/OpsApPage'
 import OpsKpisPage from './pages/ops/OpsKpisPage'
+import OpsPayrollPage from './pages/ops/OpsPayrollPage'
 import OpsPermissionsPage from './pages/ops/OpsPermissionsPage'
 import './styles.css'
 
@@ -79,6 +80,7 @@ function AppRoutes() {
           <Route path="ar"          element={<OpsArPage />} />
           <Route path="ap"          element={<OpsApPage />} />
           <Route path="kpis"        element={<OpsKpisPage />} />
+          <Route path="payroll"     element={<OpsPayrollPage />} />
           <Route path="permissions" element={<OpsPermissionsPage />} />
         </Route>
       </Route>
