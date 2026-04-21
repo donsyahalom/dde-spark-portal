@@ -52,13 +52,18 @@ const COGS_DDE = [1.78,1.96,2.14,2.06,2.31,2.48,2.57,2.74,2.65,2.82,2.90,3.24].m
 function buildPnl(scale) {
   const revenue = REV_DDE.map((v) => Math.round(v * scale))
   const cogs    = COGS_DDE.map((v, i) => Math.round(v * scale * (revenue[i] / REV_DDE[i] / scale)))
+  // Burden is the tax/benefit/WC load on direct labor — already inside
+  // COGS.  We carry it as its own series so the P&L table can show it
+  // as a column.  ~15% of COGS is a reasonable electrical-contractor
+  // blended load (field labor ≈45% of COGS × ~33% burden rate).
+  const burden   = cogs.map((c) => Math.round(c * 0.15))
   const gp       = revenue.map((r, i) => r - cogs[i])
   const overhead = revenue.map((r) => Math.round(r * 0.09))
   const net      = gp.map((g, i) => g - overhead[i])
   const gpPct    = revenue.map((r, i) => +((gp[i] / r) * 100).toFixed(1))
   const priorRevenue = revenue.map((r) => Math.round(r * 0.93))
   const goalRevenue  = revenue.map((r) => Math.round(r * 1.05))
-  return { labels: MONTHS, revenue, cogs, gp, overhead, net, gpPct, priorRevenue, goalRevenue }
+  return { labels: MONTHS, revenue, cogs, burden, gp, overhead, net, gpPct, priorRevenue, goalRevenue }
 }
 
 export const PNL = {
@@ -181,6 +186,80 @@ export const KPI_SPARKS = [
   { id:'kpiHeadcount', label:'Headcount',         value:'127 field + office',data:[112,115,118,120,122,123,125,124,126,126,127,127], color:'#FFFFFF' },
   { id:'kpiCoYield',   label:'Change-order yield',value:'6.1% of contract', data:[9.2,8.5,7.9,7.5,7.1,6.8,6.4,6.2,6.0,6.1,6.2,6.1], color:'#F0C040' },
 ]
+
+// --------------------------------------------------------------------
+//  Payroll — weekly register lines (demo snapshot)
+// --------------------------------------------------------------------
+// Each row is "one employee on one job for one pay period" — the grain
+// the timecard system hands off to payroll.  Hours fields are straight
+// numbers; computePayroll() below derives wages + the full burden stack.
+//
+// Burden-rate assumptions used by computePayroll():
+//   FICA         7.65%   of wages         (SS + Medicare employer half)
+//   FUTA         0.6%    of wages         (simple, uncapped for demo)
+//   SUTA         2.7%    of wages         (CT blended)
+//   Workers Comp 8.5%    of wages         (electrical / mech blended)
+//   GL Liability 1.0%    of wages         (commercial GL pass-through)
+//   Retirement   3.0%    of wages         (employer match)
+//   Health       $185    flat per pay period / employee
+// These are demo numbers — easy to tune once Supabase / ADP is wired.
+
+export const PAYROLL_LINES = [
+  // Week ending 2026-04-10
+  { week:'2026-04-10', emp:'Carlos Rodriguez', trade:'JW',    job:'2430', jobName:'West Haven HS',        regHrs:40, otHrs: 8, sickHrs:0, vacHrs:0, holHrs:0, perDiem:120, rate:52.00 },
+  { week:'2026-04-10', emp:'Tyler O\u2019Brien',  trade:'JW',    job:'2430', jobName:'West Haven HS',        regHrs:40, otHrs: 4, sickHrs:0, vacHrs:0, holHrs:0, perDiem:120, rate:52.00 },
+  { week:'2026-04-10', emp:'Miguel Fuentes',   trade:'AP4',   job:'2430', jobName:'West Haven HS',        regHrs:40, otHrs: 2, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:36.50 },
+  { week:'2026-04-10', emp:'Jim Kowalski',     trade:'Fore',  job:'2512', jobName:'Sage Park Apts C',     regHrs:40, otHrs: 6, sickHrs:0, vacHrs:0, holHrs:0, perDiem:100, rate:58.00 },
+  { week:'2026-04-10', emp:'Andre Chen',       trade:'JW',    job:'2512', jobName:'Sage Park Apts C',     regHrs:36, otHrs: 0, sickHrs:4, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-04-10', emp:'Luis Ortega',      trade:'AP3',   job:'2512', jobName:'Sage Park Apts C',     regHrs:40, otHrs: 2, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:32.00 },
+  { week:'2026-04-10', emp:'Nate Hollis',      trade:'JW',    job:'2544', jobName:'Hartford Municipal',   regHrs:32, otHrs: 0, sickHrs:0, vacHrs:8, holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-04-10', emp:'Kevin Doyle',      trade:'Fore',  job:'2544', jobName:'Hartford Municipal',   regHrs:40, otHrs: 4, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:58.00 },
+  { week:'2026-04-10', emp:'Rashid Ali',       trade:'JW',    job:'2580', jobName:'Watertown Courthouse', regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem: 90, rate:52.00 },
+  { week:'2026-04-10', emp:'Brian Shea',       trade:'AP2',   job:'2580', jobName:'Watertown Courthouse', regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem: 90, rate:28.50 },
+  { week:'2026-04-10', emp:'Eric Pires',       trade:'PM',    job:'D101', jobName:'CCSU Parking Deck',    regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:62.00 },
+  { week:'2026-04-10', emp:'Marco Delgado',    trade:'JW',    job:'D101', jobName:'CCSU Parking Deck',    regHrs:40, otHrs: 2, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+
+  // Week ending 2026-04-17
+  { week:'2026-04-17', emp:'Carlos Rodriguez', trade:'JW',    job:'2430', jobName:'West Haven HS',        regHrs:40, otHrs: 6, sickHrs:0, vacHrs:0, holHrs:0, perDiem:120, rate:52.00 },
+  { week:'2026-04-17', emp:'Tyler O\u2019Brien',  trade:'JW',    job:'2512', jobName:'Sage Park Apts C',     regHrs:38, otHrs: 2, sickHrs:2, vacHrs:0, holHrs:0, perDiem:100, rate:52.00 },
+  { week:'2026-04-17', emp:'Miguel Fuentes',   trade:'AP4',   job:'2430', jobName:'West Haven HS',        regHrs:40, otHrs: 4, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:36.50 },
+  { week:'2026-04-17', emp:'Jim Kowalski',     trade:'Fore',  job:'2512', jobName:'Sage Park Apts C',     regHrs:40, otHrs: 2, sickHrs:0, vacHrs:0, holHrs:0, perDiem:100, rate:58.00 },
+  { week:'2026-04-17', emp:'Andre Chen',       trade:'JW',    job:'2512', jobName:'Sage Park Apts C',     regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-04-17', emp:'Luis Ortega',      trade:'AP3',   job:'2544', jobName:'Hartford Municipal',   regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:32.00 },
+  { week:'2026-04-17', emp:'Nate Hollis',      trade:'JW',    job:'2544', jobName:'Hartford Municipal',   regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-04-17', emp:'Kevin Doyle',      trade:'Fore',  job:'2544', jobName:'Hartford Municipal',   regHrs:40, otHrs: 8, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:58.00 },
+  { week:'2026-04-17', emp:'Rashid Ali',       trade:'JW',    job:'2580', jobName:'Watertown Courthouse', regHrs:40, otHrs: 4, sickHrs:0, vacHrs:0, holHrs:0, perDiem: 90, rate:52.00 },
+  { week:'2026-04-17', emp:'Brian Shea',       trade:'AP2',   job:'2601', jobName:'UConn Gampel Reno',    regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:8, perDiem:  0, rate:28.50 },
+  { week:'2026-04-17', emp:'Eric Pires',       trade:'PM',    job:'D101', jobName:'CCSU Parking Deck',    regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:62.00 },
+  { week:'2026-04-17', emp:'Marco Delgado',    trade:'JW',    job:'D118', jobName:'New Haven Pier',       regHrs:40, otHrs: 6, sickHrs:0, vacHrs:0, holHrs:0, perDiem: 80, rate:52.00 },
+]
+
+// Expand a raw line into wages + full burden stack.  Kept here (not in
+// the page) so "by employee" and "by job" aggregations can reuse the
+// exact same math.
+export function computePayroll(line) {
+  const regPay = line.regHrs  * line.rate
+  const otPay  = line.otHrs   * line.rate * 1.5
+  const sickPay = line.sickHrs * line.rate
+  const vacPay  = line.vacHrs  * line.rate
+  const holPay  = line.holHrs  * line.rate
+  const wages  = regPay + otPay + sickPay + vacPay + holPay
+  const fica       = wages * 0.0765
+  const futa       = wages * 0.006
+  const suta       = wages * 0.027
+  const wc         = wages * 0.085
+  const liability  = wages * 0.010
+  const retirement = wages * 0.030
+  const health     = 185 // flat per pay period
+  const totalBurden = fica + futa + suta + wc + liability + retirement + health
+  const totalCost   = wages + totalBurden + line.perDiem
+  return {
+    ...line,
+    regPay, otPay, sickPay, vacPay, holPay, wages,
+    fica, futa, suta, wc, liability, retirement, health,
+    totalBurden, totalCost,
+  }
+}
 
 // --------------------------------------------------------------------
 //  Permissions — synced users

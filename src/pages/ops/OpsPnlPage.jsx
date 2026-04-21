@@ -2,7 +2,7 @@ import { Chart } from 'react-chartjs-2'
 import OpsChartBox from '../../components/ops/OpsChartBox'
 import OpsSectionCard from '../../components/ops/OpsSectionCard'
 import { useOpsData } from '../../hooks/useOpsData'
-import { fmtK, pct } from '../../lib/opsFormat'
+import { fmt, fmtK, pct } from '../../lib/opsFormat'
 import { PALETTE } from '../../lib/opsChartOpts'
 
 export default function OpsPnlPage() {
@@ -24,26 +24,32 @@ export default function OpsPnlPage() {
     ],
   }
 
-  const AXIS = 'rgba(255,255,255,0.55)'
-  const GRID = 'rgba(240,192,64,0.10)'
+  const AXIS = 'rgba(255,255,255,0.82)'
+  const GRID = 'rgba(240,192,64,0.14)'
 
   const opts = {
     responsive: true,
     maintainAspectRatio: false,
     interaction: { mode: 'index', intersect: false },
     plugins: {
-      legend: { display: true, position: 'top', align: 'end', labels: { color: 'rgba(255,255,255,0.85)', font: { size: 11 } } },
+      legend: { display: true, position: 'top', align: 'end', labels: { color: 'rgba(255,255,255,0.95)', font: { size: 11 } } },
       tooltip: {
+        // Render a single, explicitly-ordered body so the reader sees
+        // Revenue → COGS → GP $ → GP margin % → Overhead → Net Profit
+        // regardless of dataset order or chart type.
+        displayColors: false,
         callbacks: {
           label: (ctx) => {
-            const label = ctx.dataset.label || ''
-            const val   = ctx.parsed.y
-            if (label.includes('%')) return `${label}: ${pct(val)}`
-            return `${label}: ${fmtK(val)}`
-          },
-          afterBody: (items) => {
-            const i = items[0]?.dataIndex ?? 0
-            return `GP $: ${fmtK(pnl.gp[i])}`
+            if (ctx.datasetIndex !== 0) return null
+            const i = ctx.dataIndex
+            return [
+              `Revenue:     ${fmtK(pnl.revenue[i])}`,
+              `COGS:        ${fmtK(pnl.cogs[i])}`,
+              `GP $:        ${fmtK(pnl.gp[i])}`,
+              `GP margin %: ${pct(pnl.gpPct[i])}`,
+              `Overhead:    ${fmtK(pnl.overhead[i])}`,
+              `Net Profit:  ${fmtK(pnl.net[i])}`,
+            ]
           },
         },
       },
@@ -97,6 +103,50 @@ export default function OpsPnlPage() {
         <OpsChartBox size="lg">
           <Chart type="bar" data={data} options={opts} />
         </OpsChartBox>
+      </OpsSectionCard>
+
+      <OpsSectionCard
+        title="Monthly detail"
+        subtitle="Same period as the chart above — revenue, COGS, labor burden (inside COGS), gross profit, overhead, net profit."
+      >
+        <table className="ops-table">
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th className="right">Revenue</th>
+              <th className="right">COGS</th>
+              <th className="right">Burden</th>
+              <th className="right">Gross Profit</th>
+              <th className="right">GP %</th>
+              <th className="right">Overhead</th>
+              <th className="right">Net Profit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pnl.labels.map((m, i) => (
+              <tr key={m}>
+                <td>{m}</td>
+                <td className="right">{fmt(pnl.revenue[i])}</td>
+                <td className="right">{fmt(pnl.cogs[i])}</td>
+                <td className="right ops-text-dim">{fmt(pnl.burden[i])}</td>
+                <td className="right">{fmt(pnl.gp[i])}</td>
+                <td className="right">{pct(pnl.gpPct[i])}</td>
+                <td className="right">{fmt(pnl.overhead[i])}</td>
+                <td className={`right ${pnl.net[i] >= 0 ? 'ops-text-pos' : 'ops-text-neg'}`}>{fmt(pnl.net[i])}</td>
+              </tr>
+            ))}
+            <tr style={{ borderTop: '2px solid var(--border-bright)', fontWeight: 700 }}>
+              <td>Total</td>
+              <td className="right">{fmt(totals.rev)}</td>
+              <td className="right">{fmt(totals.cogs)}</td>
+              <td className="right ops-text-dim">{fmt(pnl.burden.reduce((a, b) => a + b, 0))}</td>
+              <td className="right">{fmt(totals.gp)}</td>
+              <td className="right">{pct(gpPct)}</td>
+              <td className="right">{fmt(totals.oh)}</td>
+              <td className={`right ${totals.net >= 0 ? 'ops-text-pos' : 'ops-text-neg'}`}>{fmt(totals.net)}</td>
+            </tr>
+          </tbody>
+        </table>
       </OpsSectionCard>
     </div>
   )

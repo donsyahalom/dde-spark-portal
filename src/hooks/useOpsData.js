@@ -8,9 +8,11 @@ import {
   KPIS,
   KPI_SPARKS,
   PAYMENT_HISTORY,
+  PAYROLL_LINES,
   PERM_USERS,
   PNL,
   buildWeekly,
+  computePayroll,
 } from '../lib/opsMockData'
 
 // Single hook that returns all the slices the ops pages need for the
@@ -30,6 +32,7 @@ export function useOpsData() {
       ...pnl,
       revenue:  pnl.revenue.map((v) => Math.round(v * adjust)),
       cogs:     pnl.cogs.map((v) => Math.round(v * adjust)),
+      burden:   pnl.burden.map((v) => Math.round(v * adjust)),
       gp:       pnl.gp.map((v) => Math.round(v * adjust)),
       overhead: pnl.overhead.map((v) => Math.round(v * adjust)),
       net:      pnl.net.map((v) => Math.round(v * adjust)),
@@ -44,8 +47,9 @@ export function useOpsData() {
       paymentHistory: PAYMENT_HISTORY,
       kpiSparks:      KPI_SPARKS,
       permUsers:      PERM_USERS,
+      payrollLines:   PAYROLL_LINES,
     }
   }, [pc, basis])
 }
 
-export { buildWeekly }
+export { buildWeekly, computePayroll }

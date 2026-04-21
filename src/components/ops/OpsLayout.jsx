@@ -10,6 +10,7 @@ const SUBNAV = [
   { to: '/ops/cashflow',   label: 'Cashflow' },
   { to: '/ops/ar',         label: 'A/R' },
   { to: '/ops/ap',         label: 'A/P' },
+  { to: '/ops/payroll',    label: 'Payroll' },
   { to: '/ops/kpis',       label: 'KPIs' },
   { to: '/ops/permissions',label: 'Permissions' },
 ]
@@ -28,6 +29,7 @@ const PAGE_TITLE = {
   '/ops/cashflow':    'Cashflow',
   '/ops/ar':          'A/R Detail',
   '/ops/ap':          'A/P Detail',
+  '/ops/payroll':     'Payroll',
   '/ops/kpis':        'KPIs',
   '/ops/permissions': 'Permissions',
 }
