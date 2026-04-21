@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import {
   Chart as ChartJS,
   ArcElement,
@@ -12,30 +11,26 @@ import {
   Tooltip,
 } from 'chart.js'
 
-// Fixed-height wrapper + lazy Chart.js registration.  The mockup learned
-// the hard way that <canvas> without a height and maintainAspectRatio:
-// false grows forever; the `.ops-chart` CSS gives every chart a
-// deterministic box.
+// Register Chart.js components at module-load time.  Registering inside a
+// useEffect runs too late — the <Line>/<Bar> children in this wrapper are
+// rendered before the parent's effect fires, so the chart tries to build
+// with an unregistered "category" scale and crashes the whole page.
+ChartJS.register(
+  ArcElement,
+  BarElement,
+  CategoryScale,
+  Filler,
+  Legend,
+  LinearScale,
+  LineElement,
+  PointElement,
+  Tooltip,
+)
 
-let registered = false
-function ensureRegistered() {
-  if (registered) return
-  ChartJS.register(
-    ArcElement,
-    BarElement,
-    CategoryScale,
-    Filler,
-    Legend,
-    LinearScale,
-    LineElement,
-    PointElement,
-    Tooltip,
-  )
-  registered = true
-}
-
+// Fixed-height wrapper for every chart.  `.ops-chart` CSS gives a
+// deterministic box so Chart.js' maintainAspectRatio:false doesn't grow
+// the canvas forever.
 export default function OpsChartBox({ size = 'lg', children, className = '' }) {
-  useEffect(() => { ensureRegistered() }, [])
   return (
     <div className={`ops-chart ${size} ${className}`.trim()}>
       {children}
