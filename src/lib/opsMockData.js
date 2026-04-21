@@ -186,9 +186,9 @@ export const KPI_SPARKS = [
 //  Permissions — synced users
 // --------------------------------------------------------------------
 export const PERM_USERS = [
-  { sparksId:'sp_3841', name:'Mike DuBaldo',  email:'mike@dubaldo.com', role:'admin',   pcs:['DDE','DCM','SILK'], hiddenTabs:[], hiddenFields:[], jobAccess:'all' },
-  { sparksId:'sp_3901', name:'Tony Russo',    email:'tony@dubaldo.com', role:'finance', pcs:['DDE','DCM','SILK'], hiddenTabs:[], hiddenFields:[], jobAccess:'all' },
-  { sparksId:'sp_4012', name:"Jim O'Connell", email:'jim@dubaldo.com',  role:'pm',      pcs:['DDE'],              hiddenTabs:['ar','ap'], hiddenFields:[], jobAccess:'assigned' },
-  { sparksId:'sp_4177', name:'Sara Chen',     email:'sara@dubaldo.com', role:'viewer',  pcs:['DDE'],              hiddenTabs:['ar','ap','perms'], hiddenFields:['revenue_dollar','gp_dollar','contract_amount','bank_balance'], jobAccess:'whitelist', jobAccessList:['2430','2512'] },
-  { sparksId:'sp_4298', name:'Eric Pires',    email:'eric@dcm.com',     role:'manager', pcs:['DCM'],              hiddenTabs:[], hiddenFields:[], jobAccess:'all' },
+  { sparksId:'sp_3841', name:'Angelina DuBaldo', email:'angelina@dubaldo.com', role:'admin',   pcs:['DDE','DCM','SILK'], hiddenTabs:[], hiddenFields:[], jobAccess:'all' },
+  { sparksId:'sp_3901', name:'Paulette Anderson', email:'paulette@dubaldo.com', role:'finance', pcs:['DDE','DCM','SILK'], hiddenTabs:[], hiddenFields:[], jobAccess:'all' },
+  { sparksId:'sp_4012', name:'Dan Mulligan',      email:'dan@dubaldo.com',      role:'pm',      pcs:['DDE'],              hiddenTabs:['ar','ap'], hiddenFields:[], jobAccess:'assigned' },
+  { sparksId:'sp_4298', name:'Paul Diliberto',    email:'paul@dubaldo.com',     role:'manager', pcs:['DCM'],              hiddenTabs:[], hiddenFields:[], jobAccess:'all' },
+  { sparksId:'sp_4177', name:'Scott Williams',    email:'scott@dubaldo.com',    role:'viewer',  pcs:['DDE'],              hiddenTabs:['ar','ap','perms'], hiddenFields:['revenue_dollar','gp_dollar','contract_amount','bank_balance'], jobAccess:'whitelist', jobAccessList:['2430','2512'] },
 ]

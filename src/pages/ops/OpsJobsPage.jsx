@@ -35,6 +35,8 @@ export default function OpsJobsPage() {
   const [topBy, setTopBy]     = useState('revenue')
   const [topN, setTopN]       = useState(null)
   const [expanded, setExpanded] = useState(null)
+  // 'actual' shows weekly period values; 'accumulated' shows running totals.
+  const [mode, setMode]       = useState('actual')
 
   const rows = useMemo(() => {
     let rows = jobs.slice()
@@ -91,6 +93,10 @@ export default function OpsJobsPage() {
             <option value="Hold">On hold</option>
             <option value="Closed">Closed</option>
           </select>
+          <div className="ops-toggle" title="Actual = per-week; Accumulated = running totals">
+            <button onClick={() => setMode('actual')}      className={mode === 'actual'      ? 'active' : ''}>Actual</button>
+            <button onClick={() => setMode('accumulated')} className={mode === 'accumulated' ? 'active' : ''}>Accumulated</button>
+          </div>
           <label className="ops-checkbox" style={{ gap: 6 }}>
             <span style={{ fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--white-dim)' }}>Top</span>
             <input
@@ -137,6 +143,7 @@ export default function OpsJobsPage() {
               expanded={expanded === j.num}
               onToggle={() => setExpanded(expanded === j.num ? null : j.num)}
               fmtCell={fmtCell}
+              mode={mode}
             />
           ))}
           {!rows.length && (
@@ -152,16 +159,29 @@ export default function OpsJobsPage() {
   )
 }
 
-function JobRow({ job, expanded, onToggle, fmtCell }) {
+// Running cumulative sum — used when mode === 'accumulated'.
+function runSum(arr) {
+  let s = 0
+  return arr.map((v) => (s += v))
+}
+
+function JobRow({ job, expanded, onToggle, fmtCell, mode = 'actual' }) {
   const costTot = job.lab + job.mat + job.sub
   const weekly  = useMemo(() => buildWeekly(job.revenue, costTot), [job.revenue, costTot])
+
+  const series = useMemo(() => {
+    if (mode === 'accumulated') {
+      return { revenue: runSum(weekly.revenue), cogs: runSum(weekly.cogs), gp: runSum(weekly.gp) }
+    }
+    return { revenue: weekly.revenue, cogs: weekly.cogs, gp: weekly.gp }
+  }, [weekly, mode])
 
   const data = {
     labels: weekly.labels,
     datasets: [
-      { label: 'Revenue', data: weekly.revenue, borderColor: PALETTE.blue,  backgroundColor: 'rgba(111,168,255,0.10)', fill: true, tension: 0.3, borderWidth: 2 },
-      { label: 'COGS',    data: weekly.cogs,    borderColor: PALETTE.red,   backgroundColor: 'transparent', tension: 0.3, borderWidth: 2 },
-      { label: 'GP',      data: weekly.gp,      borderColor: PALETTE.green, backgroundColor: 'transparent', tension: 0.3, borderWidth: 2 },
+      { label: 'Revenue', data: series.revenue, borderColor: PALETTE.blue,  backgroundColor: 'rgba(111,168,255,0.10)', fill: true, tension: 0.3, borderWidth: 2 },
+      { label: 'COGS',    data: series.cogs,    borderColor: PALETTE.red,   backgroundColor: 'transparent', tension: 0.3, borderWidth: 2 },
+      { label: 'GP',      data: series.gp,      borderColor: PALETTE.green, backgroundColor: 'transparent', tension: 0.3, borderWidth: 2 },
     ],
   }
 
@@ -184,7 +204,9 @@ function JobRow({ job, expanded, onToggle, fmtCell }) {
           <td colSpan={COLUMNS.length + 1} className="ops-row-expand">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
               <div>
-                <div style={{ fontWeight: 700, color: 'var(--white)' }}>{job.name} · weekly curve</div>
+                <div style={{ fontWeight: 700, color: 'var(--white)' }}>
+                  {job.name} · weekly curve <span className="ops-small ops-text-dim" style={{ fontWeight: 400 }}>({mode === 'accumulated' ? 'accumulated' : 'actual'})</span>
+                </div>
                 <div className="ops-small ops-text-dim">
                   Rev {fmtK(job.revenue)} · COGS {fmtK(costTot)} · GP {fmtK(job.revenue - costTot)}
                 </div>

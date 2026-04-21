@@ -9,7 +9,7 @@ const Ctx = createContext(null)
 const PC_SUBTITLE = {
   COMBINED: 'All profit centers',
   DDE:      'DuBaldo Electric',
-  DCM:      'DuBaldo Civil / Mechanical',
+  DCM:      'DCM (Prop Mgmt)',
   SILK:     'Silk City',
 }
 

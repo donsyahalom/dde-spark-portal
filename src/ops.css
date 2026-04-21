@@ -8,6 +8,10 @@
 .ops-root {
   font-family: var(--font-body);
   color: var(--white);
+  /* Lift the dim-grey token a touch so subtitles, stat labels and table
+     labels read better against the dark green bg.  Scoped to .ops-root
+     so it doesn't affect the rest of the Sparks portal. */
+  --white-dim: rgba(255,255,255,0.82);
 }
 
 /* Page title + subtitle (overrides of .page-title / .page-subtitle so we can

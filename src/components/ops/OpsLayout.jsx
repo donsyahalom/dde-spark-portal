@@ -17,7 +17,7 @@ const SUBNAV = [
 const PCS = [
   { id: 'COMBINED', label: 'Combined' },
   { id: 'DDE',      label: 'DuBaldo Electric' },
-  { id: 'DCM',      label: 'DuBaldo Civil/Mech' },
+  { id: 'DCM',      label: 'DCM (Prop Mgmt)' },
   { id: 'SILK',     label: 'Silk City' },
 ]
 

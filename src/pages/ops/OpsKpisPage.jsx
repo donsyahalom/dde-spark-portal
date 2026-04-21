@@ -23,29 +23,38 @@ export default function OpsKpisPage() {
 
   return (
     <div>
-      <div className="ops-grid-3">
+      {/*
+        Give each KPI card real room: two across on desktop instead of
+        three, stack the value above a full-width sparkline that's 2x the
+        previous height so the trend line is actually legible.
+      */}
+      <div
+        className="ops-kpi-top"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          gap: 16,
+          marginBottom: 20,
+        }}
+      >
         {kpiSparks.map((k) => (
           <OpsSectionCard key={k.id} title={k.label}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-              <div className="ops-kpi-value" style={{ fontSize: '1.4rem' }}>{k.value}</div>
-              <div style={{ width: 160 }}>
-                <OpsChartBox size="spark">
-                  <Line
-                    data={{
-                      labels: k.data.map((_, i) => String(i)),
-                      datasets: [{
-                        data: k.data,
-                        borderColor: k.color,
-                        backgroundColor: 'transparent',
-                        tension: 0.3,
-                        borderWidth: 2,
-                      }],
-                    }}
-                    options={sparkOpts}
-                  />
-                </OpsChartBox>
-              </div>
-            </div>
+            <div className="ops-kpi-value" style={{ fontSize: '1.7rem', marginBottom: 10 }}>{k.value}</div>
+            <OpsChartBox size="sm">
+              <Line
+                data={{
+                  labels: k.data.map((_, i) => String(i)),
+                  datasets: [{
+                    data: k.data,
+                    borderColor: k.color,
+                    backgroundColor: 'transparent',
+                    tension: 0.3,
+                    borderWidth: 2,
+                  }],
+                }}
+                options={sparkOpts}
+              />
+            </OpsChartBox>
           </OpsSectionCard>
         ))}
       </div>

@@ -3,9 +3,11 @@
 
 import { fmtK } from './opsFormat'
 
-const AXIS   = 'rgba(255,255,255,0.55)' // --white-dim
-const GRID   = 'rgba(240,192,64,0.10)'  // faint gold lines on dark
-const LEGEND = 'rgba(255,255,255,0.85)' // --white-soft
+// Lightened for readability on the dark green bg.  Axis ticks and legend
+// both sit at ~0.80–0.95 now; grid gold kept faint so it doesn't clash.
+const AXIS   = 'rgba(255,255,255,0.82)'
+const GRID   = 'rgba(240,192,64,0.14)'
+const LEGEND = 'rgba(255,255,255,0.95)'
 
 export const moneyLineOpts = (overrides = {}) => ({
   responsive: true,
@@ -57,5 +59,5 @@ export const PALETTE = {
   gold:   '#F0C040',
   purple: '#C08AFF',
   amber:  '#F59E0B',
-  dim:    'rgba(255,255,255,0.55)',
+  dim:    'rgba(255,255,255,0.82)',
 }
