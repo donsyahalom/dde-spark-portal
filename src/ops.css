@@ -186,6 +186,60 @@
 .ops-stat-val { font-family: var(--font-display); font-size: 1.3rem; color: var(--gold); font-weight: 700; margin-top: 2px; }
 .ops-stat-sub { font-size: 0.72rem; color: var(--white-dim); margin-top: 2px; }
 
+/* Compact key/value tile — used for retainage, email settings, etc. */
+.ops-stat-box {
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+/* Modal shell — email preview + confirm dialogs */
+.ops-modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 9000; padding: 24px;
+}
+.ops-modal {
+  background: var(--bg-darker, #111);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius);
+  max-width: 920px; width: 100%;
+  max-height: 88vh; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.ops-modal-head {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+  color: var(--white);
+}
+.ops-modal-body {
+  padding: 0; overflow: auto; background: #f5f5f5;
+  flex: 1;
+}
+.ops-modal-foot {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  display: flex; justify-content: flex-end; gap: 8px;
+}
+
+/* Pill-style buttons used on settings + preview rows */
+.ops-btn {
+  background: var(--gold); color: #000;
+  border: none; border-radius: var(--radius-sm);
+  padding: 6px 14px; font-weight: 700; font-size: 0.82rem;
+  cursor: pointer; letter-spacing: 0.02em;
+}
+.ops-btn:hover { filter: brightness(1.08); }
+.ops-btn.ghost {
+  background: transparent; color: var(--white);
+  border: 1px solid var(--border-bright);
+}
+.ops-btn.ghost:hover { background: var(--white-faint); }
+
 /* Forms inside the ops area (inherit .form-input but a bit tighter) */
 .ops-input {
   background: rgba(0,0,0,0.4); border: 1px solid var(--border);

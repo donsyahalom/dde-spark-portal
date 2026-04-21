@@ -18,7 +18,7 @@ export default function OpsOverviewPage() {
         fill: true, tension: 0.3, borderWidth: 2,
       },
       {
-        label: 'COGS', data: pnl.cogs,
+        label: 'Direct Cost', data: pnl.cogs,
         borderColor: PALETTE.red, backgroundColor: 'transparent',
         tension: 0.3, borderWidth: 2,
       },
@@ -52,7 +52,7 @@ export default function OpsOverviewPage() {
       </div>
 
       <OpsSectionCard
-        title="Revenue, COGS, GP — monthly"
+        title="Revenue, Direct Cost, GP — monthly"
         subtitle="Dashed line shows prior-year revenue for the same months."
       >
         <OpsChartBox size="lg">

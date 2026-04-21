@@ -8,14 +8,14 @@ import { PALETTE } from '../../lib/opsChartOpts'
 export default function OpsPnlPage() {
   const { pnl } = useOpsData()
 
-  // Combined chart — bars for Rev/COGS/Overhead, solid line for Net,
-  // dashed line for GP %.  Unified index tooltip shows all of them plus
-  // GP $ in the afterBody.
+  // Combined chart — bars for Rev/Direct Cost/Overhead, solid line for
+  // Net, dashed line for GP %.  Unified index tooltip shows all of them
+  // plus GP $ in the afterBody.
   const data = {
     labels: pnl.labels,
     datasets: [
       { type: 'bar',  label: 'Revenue',      data: pnl.revenue,  backgroundColor: PALETTE.blue,   yAxisID: 'y' },
-      { type: 'bar',  label: 'COGS',         data: pnl.cogs,     backgroundColor: PALETTE.red,    yAxisID: 'y' },
+      { type: 'bar',  label: 'Direct Cost',  data: pnl.cogs,     backgroundColor: PALETTE.red,    yAxisID: 'y' },
       { type: 'bar',  label: 'Overhead',     data: pnl.overhead, backgroundColor: PALETTE.amber,  yAxisID: 'y' },
       { type: 'line', label: 'Net Profit',   data: pnl.net,      borderColor: PALETTE.purple,
         backgroundColor: 'transparent', tension: 0.3, borderWidth: 2.5, yAxisID: 'y' },
@@ -35,20 +35,20 @@ export default function OpsPnlPage() {
       legend: { display: true, position: 'top', align: 'end', labels: { color: 'rgba(255,255,255,0.95)', font: { size: 11 } } },
       tooltip: {
         // Render a single, explicitly-ordered body so the reader sees
-        // Revenue → COGS → GP $ → GP margin % → Overhead → Net Profit
-        // regardless of dataset order or chart type.
+        // Revenue → Direct Cost → GP $ → GP margin % → Overhead → Net
+        // Profit regardless of dataset order or chart type.
         displayColors: false,
         callbacks: {
           label: (ctx) => {
             if (ctx.datasetIndex !== 0) return null
             const i = ctx.dataIndex
             return [
-              `Revenue:     ${fmtK(pnl.revenue[i])}`,
-              `COGS:        ${fmtK(pnl.cogs[i])}`,
-              `GP $:        ${fmtK(pnl.gp[i])}`,
-              `GP margin %: ${pct(pnl.gpPct[i])}`,
-              `Overhead:    ${fmtK(pnl.overhead[i])}`,
-              `Net Profit:  ${fmtK(pnl.net[i])}`,
+              `Revenue:      ${fmtK(pnl.revenue[i])}`,
+              `Direct Cost:  ${fmtK(pnl.cogs[i])}`,
+              `GP $:         ${fmtK(pnl.gp[i])}`,
+              `GP margin %:  ${pct(pnl.gpPct[i])}`,
+              `Overhead:     ${fmtK(pnl.overhead[i])}`,
+              `Net Profit:   ${fmtK(pnl.net[i])}`,
             ]
           },
         },
@@ -84,7 +84,7 @@ export default function OpsPnlPage() {
     <div>
       <div className="ops-grid-5">
         <OpsSectionCard title="Revenue"><div className="ops-kpi-value">{fmtK(totals.rev)}</div></OpsSectionCard>
-        <OpsSectionCard title="COGS"><div className="ops-kpi-value">{fmtK(totals.cogs)}</div></OpsSectionCard>
+        <OpsSectionCard title="Direct Cost"><div className="ops-kpi-value">{fmtK(totals.cogs)}</div></OpsSectionCard>
         <OpsSectionCard title="Gross Profit">
           <div className="ops-kpi-value">{fmtK(totals.gp)}</div>
           <div className="ops-small ops-text-dim">{pct(gpPct)}</div>
@@ -97,7 +97,7 @@ export default function OpsPnlPage() {
       </div>
 
       <OpsSectionCard
-        title="Revenue, COGS, Overhead, Net Profit & GP %"
+        title="Revenue, Direct Cost, Overhead, Net Profit & GP %"
         subtitle="Hover any month — tooltip shows every series plus GP $ for the period."
       >
         <OpsChartBox size="lg">
@@ -107,14 +107,14 @@ export default function OpsPnlPage() {
 
       <OpsSectionCard
         title="Monthly detail"
-        subtitle="Same period as the chart above — revenue, COGS, labor burden (inside COGS), gross profit, overhead, net profit."
+        subtitle="Same period as the chart above — revenue, direct cost, labor burden (inside direct cost), gross profit, overhead, net profit."
       >
         <table className="ops-table">
           <thead>
             <tr>
               <th>Month</th>
               <th className="right">Revenue</th>
-              <th className="right">COGS</th>
+              <th className="right">Direct Cost</th>
               <th className="right">Burden</th>
               <th className="right">Gross Profit</th>
               <th className="right">GP %</th>
