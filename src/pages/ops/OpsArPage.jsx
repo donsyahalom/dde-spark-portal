@@ -2,11 +2,13 @@ import { useMemo, useState } from 'react'
 import OpsSectionCard from '../../components/ops/OpsSectionCard'
 import OpsPaymentHistory from '../../components/ops/OpsPaymentHistory'
 import { useOpsData } from '../../hooks/useOpsData'
+import { useAuth } from '../../context/AuthContext'
 import { fmt, fmtK } from '../../lib/opsFormat'
 import {
-  AGING_BUCKETS,
+  DAYS_BUCKETS,
   agingByCustomer,
   buildArEmailHtml,
+  buildMonthBuckets,
   daysLateOf,
   sortByDaysLateDesc,
 } from '../../lib/opsEmailTemplate'
@@ -29,8 +31,89 @@ function saveSettings(s) {
 
 const DOW_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-// ── Aging report table (in-page version; mirrors the email output) ──
-function AgingTable({ title, rows, emptyMsg }) {
+// ── Cell with hover tooltip listing the invoices that make up its $ ──
+// Lightweight tooltip — we don't pull in a lib just for this.  Uses a
+// popover div revealed on :hover/:focus via local state.  The cell is
+// role="button" so it's keyboard-focusable.
+function AgingCell({ amount, invoices, align = 'right', bold = false }) {
+  const [open, setOpen] = useState(false)
+  const hasInvoices = invoices && invoices.length > 0
+  const show = () => hasInvoices && setOpen(true)
+  const hide = () => setOpen(false)
+  return (
+    <td
+      className={align === 'right' ? 'right' : ''}
+      style={{
+        position: 'relative',
+        fontWeight: bold ? 700 : 400,
+        color: amount > 0 ? undefined : 'var(--text-dim)',
+        cursor: hasInvoices ? 'help' : 'default',
+      }}
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+      tabIndex={hasInvoices ? 0 : -1}
+    >
+      {amount > 0 ? fmt(amount) : '—'}
+      {open && hasInvoices && (
+        <div
+          className="ops-tooltip"
+          role="tooltip"
+          style={{
+            position: 'absolute',
+            zIndex: 50,
+            right: 0,
+            top: 'calc(100% + 4px)',
+            minWidth: 240,
+            maxWidth: 340,
+            background: 'var(--panel-dark, #1b1f25)',
+            border: '1px solid var(--border-bright, #3a4049)',
+            borderRadius: 6,
+            padding: '8px 10px',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
+            textAlign: 'left',
+            fontWeight: 400,
+            fontSize: '0.78rem',
+            color: 'var(--white)',
+          }}
+        >
+          <div className="ops-small" style={{ color: 'var(--gold)', marginBottom: 4, letterSpacing: '0.04em' }}>
+            {invoices.length} invoice{invoices.length === 1 ? '' : 's'}
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left',  padding: '2px 4px', color: 'var(--text-dim)', fontWeight: 600 }}>Inv #</th>
+                <th style={{ textAlign: 'left',  padding: '2px 4px', color: 'var(--text-dim)', fontWeight: 600 }}>Date</th>
+                <th style={{ textAlign: 'right', padding: '2px 4px', color: 'var(--text-dim)', fontWeight: 600 }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map((inv) => (
+                <tr key={inv.invoice}>
+                  <td style={{ padding: '2px 4px' }}>{inv.invoice}</td>
+                  <td style={{ padding: '2px 4px', color: 'var(--text-dim)' }}>{inv.invDate}</td>
+                  <td style={{ padding: '2px 4px', textAlign: 'right', fontWeight: 600 }}>{fmt(inv.balance)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </td>
+  )
+}
+
+// ── Aging report table ─────────────────────────────────────────────
+// Props:
+//   • title          : section title above the table
+//   • rows           : [{ customer, buckets:[{amount,invoices}], total }]
+//   • bucketLabels   : array of column labels (from DAYS_BUCKETS or months)
+//   • retainageByCust: optional { [customer]: retainageHeld$ } — when
+//                      supplied we show a Retainage column (contract only)
+//   • emptyMsg       : shown when rows is empty
+function AgingTable({ title, rows, bucketLabels, retainageByCust, emptyMsg }) {
   if (!rows.length) {
     return (
       <div>
@@ -39,8 +122,11 @@ function AgingTable({ title, rows, emptyMsg }) {
       </div>
     )
   }
-  const totals = AGING_BUCKETS.map((_, i) => rows.reduce((s, r) => s + r.buckets[i], 0))
+  const totals = bucketLabels.map((_, i) => rows.reduce((s, r) => s + r.buckets[i].amount, 0))
   const grand  = rows.reduce((s, r) => s + r.total, 0)
+  const retainageGrand = retainageByCust
+    ? rows.reduce((s, r) => s + (retainageByCust[r.customer] || 0), 0)
+    : 0
   return (
     <div>
       <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>{title}</div>
@@ -49,18 +135,24 @@ function AgingTable({ title, rows, emptyMsg }) {
           <thead>
             <tr>
               <th>Customer</th>
-              {AGING_BUCKETS.map((b) => <th key={b.label} className="right">{b.label}</th>)}
+              {bucketLabels.map((lbl) => <th key={lbl} className="right">{lbl}</th>)}
               <th className="right">Total</th>
+              {retainageByCust && <th className="right">Retainage</th>}
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.customer}>
                 <td>{r.customer}</td>
-                {r.buckets.map((v, i) => (
-                  <td key={i} className={`right ${v > 0 ? '' : 'ops-text-dim'}`}>{v > 0 ? fmt(v) : '—'}</td>
+                {r.buckets.map((c, i) => (
+                  <AgingCell key={i} amount={c.amount} invoices={c.invoices} />
                 ))}
                 <td className="right" style={{ fontWeight: 700 }}>{fmt(r.total)}</td>
+                {retainageByCust && (
+                  <td className="right ops-text-warn" style={{ fontWeight: 600 }}>
+                    {retainageByCust[r.customer] ? fmt(retainageByCust[r.customer]) : '—'}
+                  </td>
+                )}
               </tr>
             ))}
             <tr style={{ borderTop: '2px solid var(--border-bright)', fontWeight: 700 }}>
@@ -69,6 +161,9 @@ function AgingTable({ title, rows, emptyMsg }) {
                 <td key={i} className="right">{fmt(v)}</td>
               ))}
               <td className="right">{fmt(grand)}</td>
+              {retainageByCust && (
+                <td className="right">{retainageGrand ? fmt(retainageGrand) : '—'}</td>
+              )}
             </tr>
           </tbody>
         </table>
@@ -78,29 +173,59 @@ function AgingTable({ title, rows, emptyMsg }) {
 }
 
 export default function OpsArPage() {
-  const { arInvoices, arEmailDefaults } = useOpsData()
+  const { arInvoices, arEmailDefaults, jobs } = useOpsData()
+  const { currentUser } = useAuth()
+  const isAdmin = !!currentUser?.is_admin
   const [settings, setSettings] = useState(() => loadSettings(arEmailDefaults))
   const [showPreview, setShowPreview] = useState(false)
+  // Days vs months bucketing (applies to both AR + SR aging tables)
+  const [agingMode, setAgingMode] = useState('days')
+  // Email section is collapsed by default — admins can expand it.
+  const [emailOpen, setEmailOpen] = useState(false)
 
   // Split invoices AR vs SR so the two aging reports + two invoice lists
   // can be rendered independently (matches the email layout too).
   const arInv = useMemo(() => arInvoices.filter((i) => i.type === 'AR'), [arInvoices])
   const srInv = useMemo(() => arInvoices.filter((i) => i.type === 'SR'), [arInvoices])
 
-  const arAging = useMemo(() => agingByCustomer(arInv), [arInv])
-  const srAging = useMemo(() => agingByCustomer(srInv), [srInv])
+  // Rebuild aging rollups whenever the toggle flips.
+  const arAging = useMemo(
+    () => agingByCustomer(arInv, { mode: agingMode }),
+    [arInv, agingMode],
+  )
+  const srAging = useMemo(
+    () => agingByCustomer(srInv, { mode: agingMode }),
+    [srInv, agingMode],
+  )
 
   const arSorted = useMemo(() => sortByDaysLateDesc(arInv), [arInv])
   const srSorted = useMemo(() => sortByDaysLateDesc(srInv), [srInv])
 
-  // KPI cards — total open + bucket sums across AR+SR so the top row
-  // mirrors the old "aging at a glance" read.
+  // Column labels for the current mode
+  const bucketLabels = useMemo(() => {
+    if (agingMode === 'months') return buildMonthBuckets().map((b) => b.label)
+    return DAYS_BUCKETS.map((b) => b.label)
+  }, [agingMode])
+
+  // Retainage per customer — sum retainageHeld across their contract jobs.
+  // Only used for the Contract (AR) table.
+  const retainageByCust = useMemo(() => {
+    const m = {}
+    for (const j of jobs) {
+      if (j.type !== 'contract' || !j.retainageHeld) continue
+      m[j.customer] = (m[j.customer] || 0) + j.retainageHeld
+    }
+    return m
+  }, [jobs])
+
+  // Top-row quick cards — always use days buckets so the "aging at a
+  // glance" read stays interpretable regardless of the toggle.
   const totals = useMemo(() => {
-    const sums = AGING_BUCKETS.map(() => 0)
+    const sums = DAYS_BUCKETS.map(() => 0)
     let total = 0
     for (const inv of arInvoices) {
       const dl = daysLateOf(inv)
-      const bi = AGING_BUCKETS.findIndex((b) => dl >= b.min && dl <= b.max)
+      const bi = DAYS_BUCKETS.findIndex((b) => dl >= b.min && dl <= b.max)
       if (bi >= 0) sums[bi] += inv.balance
       total += inv.balance
     }
@@ -133,28 +258,50 @@ export default function OpsArPage() {
     <div>
       {/* ── Aging at-a-glance ─────────────────────────────────────── */}
       <div className="ops-grid-5">
-        {AGING_BUCKETS.map((b, i) => (
+        {DAYS_BUCKETS.map((b, i) => (
           <OpsSectionCard key={b.label} title={b.label}>
             <div className="ops-kpi-value">{fmtK(totals.sums[i])}</div>
-            <div className="ops-small ops-text-dim">days past due</div>
+            <div className="ops-small ops-text-dim">
+              {b.label === 'Current' ? 'not yet overdue' : 'days past due'}
+            </div>
           </OpsSectionCard>
         ))}
       </div>
 
-      {/* ── Sage-style aging reports — AR and SR side-by-side ─────── */}
+      {/* ── Sage-style aging reports — AR and SR ──────────────────── */}
       <OpsSectionCard
         title="A/R aging — Sage style"
-        subtitle="Contract (AR) and Service (SR) reports rolled up by customer, bucketed by days-past-due."
+        subtitle="Contract (AR) and Service (SR) reports rolled up by customer. Hover any cell to see the invoices behind it."
+        right={
+          <div className="ops-toolbar">
+            <div className="ops-toggle" role="group" aria-label="Aging bucket mode">
+              <button
+                type="button"
+                onClick={() => setAgingMode('days')}
+                className={agingMode === 'days' ? 'active' : ''}
+              >Days</button>
+              <button
+                type="button"
+                onClick={() => setAgingMode('months')}
+                className={agingMode === 'months' ? 'active' : ''}
+              >Months</button>
+            </div>
+          </div>
+        }
       >
         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 18 }}>
           <AgingTable
             title="Contract (AR) aging by customer"
             rows={arAging}
+            bucketLabels={bucketLabels}
+            retainageByCust={retainageByCust}
             emptyMsg="No open contract invoices."
           />
           <AgingTable
             title="Service (SR) aging by customer"
             rows={srAging}
+            bucketLabels={bucketLabels}
+            /* no retainage column for service — SR jobs don't have retention */
             emptyMsg="No open service invoices."
           />
         </div>
@@ -171,98 +318,117 @@ export default function OpsArPage() {
         </div>
       </OpsSectionCard>
 
-      {/* ── Weekly email settings + preview ──────────────────────── */}
-      <OpsSectionCard
-        title="Weekly A/R email"
-        subtitle={`Sent automatically every ${DOW_LABELS[settings.dayOfWeek]} at ${pad2(settings.sendHour)}:00. Edit recipients below. Click Preview to see exactly what lands in their inbox.`}
-        right={
-          <button className="ops-btn" onClick={() => setShowPreview(true)}>Preview email</button>
-        }
-      >
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
-          <div className="ops-stat-box">
-            <div className="ops-small ops-text-dim" style={{ marginBottom: 4 }}>Day of week</div>
-            <select
-              className="ops-select"
-              value={settings.dayOfWeek}
-              onChange={(e) => persist({ ...settings, dayOfWeek: Number(e.target.value) })}
-              style={{ width: '100%' }}
-            >
-              {DOW_LABELS.map((d, i) => <option key={d} value={i}>{d}</option>)}
-            </select>
-          </div>
-          <div className="ops-stat-box">
-            <div className="ops-small ops-text-dim" style={{ marginBottom: 4 }}>Send hour (local)</div>
-            <select
-              className="ops-select"
-              value={settings.sendHour}
-              onChange={(e) => persist({ ...settings, sendHour: Number(e.target.value) })}
-              style={{ width: '100%' }}
-            >
-              {Array.from({ length: 24 }, (_, h) => (
-                <option key={h} value={h}>{pad2(h)}:00</option>
-              ))}
-            </select>
-          </div>
-          <div className="ops-stat-box" style={{ gridColumn: '1 / -1' }}>
-            <div className="ops-small ops-text-dim" style={{ marginBottom: 4 }}>Subject line</div>
-            <input
-              className="ops-input"
-              style={{ width: '100%' }}
-              value={settings.subject}
-              onChange={(e) => persist({ ...settings, subject: e.target.value })}
-            />
-          </div>
-        </div>
-
-        <div style={{ marginTop: 14 }}>
-          <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 6 }}>
-            Recipients
-          </div>
-          <table className="ops-table" style={{ fontSize: '0.85rem' }}>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th style={{ width: 80 }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {settings.recipients.map((r, i) => (
-                <tr key={i}>
-                  <td>
-                    <input
-                      className="ops-input"
-                      style={{ width: '100%' }}
-                      value={r.name}
-                      onChange={(e) => updateRecipient(i, { name: e.target.value })}
-                      placeholder="Full name"
-                    />
-                  </td>
-                  <td>
-                    <input
-                      className="ops-input"
-                      style={{ width: '100%' }}
-                      value={r.email}
-                      onChange={(e) => updateRecipient(i, { email: e.target.value })}
-                      placeholder="name@dubaldo.com"
-                    />
-                  </td>
-                  <td>
-                    <button className="ops-btn ghost" onClick={() => removeRecipient(i)}>Remove</button>
-                  </td>
-                </tr>
-              ))}
-              {!settings.recipients.length && (
-                <tr><td colSpan={3} className="center ops-text-dim">No recipients configured.</td></tr>
+      {/* ── Weekly email settings + preview — admin-only, collapsible ── */}
+      {isAdmin && (
+        <OpsSectionCard
+          title="Weekly A/R email"
+          subtitle={emailOpen
+            ? `Sent automatically every ${DOW_LABELS[settings.dayOfWeek]} at ${pad2(settings.sendHour)}:00. Edit recipients below. Click Preview to see exactly what lands in their inbox.`
+            : `Sends every ${DOW_LABELS[settings.dayOfWeek]} at ${pad2(settings.sendHour)}:00 to ${settings.recipients.filter((r) => r.email).length} recipient${settings.recipients.filter((r) => r.email).length === 1 ? '' : 's'}. Expand to edit.`}
+          right={
+            <div style={{ display: 'flex', gap: 8 }}>
+              {emailOpen && (
+                <button className="ops-btn" onClick={() => setShowPreview(true)}>Preview email</button>
               )}
-            </tbody>
-          </table>
-          <div style={{ marginTop: 10 }}>
-            <button className="ops-btn ghost" onClick={addRecipient}>+ Add recipient</button>
-          </div>
-        </div>
-      </OpsSectionCard>
+              <button
+                className="ops-btn ghost"
+                onClick={() => setEmailOpen((v) => !v)}
+                aria-expanded={emailOpen}
+              >
+                {emailOpen ? 'Hide' : 'Expand'}
+              </button>
+            </div>
+          }
+        >
+          {emailOpen && (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+                <div className="ops-stat-box">
+                  <div className="ops-small ops-text-dim" style={{ marginBottom: 4 }}>Day of week</div>
+                  <select
+                    className="ops-select"
+                    value={settings.dayOfWeek}
+                    onChange={(e) => persist({ ...settings, dayOfWeek: Number(e.target.value) })}
+                    style={{ width: '100%' }}
+                  >
+                    {DOW_LABELS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+                  </select>
+                </div>
+                <div className="ops-stat-box">
+                  <div className="ops-small ops-text-dim" style={{ marginBottom: 4 }}>Send hour (local)</div>
+                  <select
+                    className="ops-select"
+                    value={settings.sendHour}
+                    onChange={(e) => persist({ ...settings, sendHour: Number(e.target.value) })}
+                    style={{ width: '100%' }}
+                  >
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <option key={h} value={h}>{pad2(h)}:00</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="ops-stat-box" style={{ gridColumn: '1 / -1' }}>
+                  <div className="ops-small ops-text-dim" style={{ marginBottom: 4 }}>Subject line</div>
+                  <input
+                    className="ops-input"
+                    style={{ width: '100%' }}
+                    value={settings.subject}
+                    onChange={(e) => persist({ ...settings, subject: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginTop: 14 }}>
+                <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 6 }}>
+                  Recipients
+                </div>
+                <table className="ops-table" style={{ fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th style={{ width: 80 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {settings.recipients.map((r, i) => (
+                      <tr key={i}>
+                        <td>
+                          <input
+                            className="ops-input"
+                            style={{ width: '100%' }}
+                            value={r.name}
+                            onChange={(e) => updateRecipient(i, { name: e.target.value })}
+                            placeholder="Full name"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="ops-input"
+                            style={{ width: '100%' }}
+                            value={r.email}
+                            onChange={(e) => updateRecipient(i, { email: e.target.value })}
+                            placeholder="name@dubaldo.com"
+                          />
+                        </td>
+                        <td>
+                          <button className="ops-btn ghost" onClick={() => removeRecipient(i)}>Remove</button>
+                        </td>
+                      </tr>
+                    ))}
+                    {!settings.recipients.length && (
+                      <tr><td colSpan={3} className="center ops-text-dim">No recipients configured.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+                <div style={{ marginTop: 10 }}>
+                  <button className="ops-btn ghost" onClick={addRecipient}>+ Add recipient</button>
+                </div>
+              </div>
+            </>
+          )}
+        </OpsSectionCard>
+      )}
 
       {/* ── Legacy full A/R list (kept for reference) ───────────── */}
       <OpsSectionCard title="Open A/R — all invoices">

@@ -9,18 +9,41 @@ const ALL_TABS = [
   { id: 'cashflow', label: 'Cashflow' },
   { id: 'ar',       label: 'A/R' },
   { id: 'ap',       label: 'A/P' },
+  { id: 'payroll',  label: 'Payroll' },
   { id: 'kpis',     label: 'KPIs' },
   { id: 'perms',    label: 'Permissions' },
 ]
 
 const ALL_FIELDS = [
-  { id: 'revenue_dollar',  label: 'Hide Revenue $' },
-  { id: 'gp_dollar',       label: 'Hide GP $' },
-  { id: 'contract_amount', label: 'Hide Contract amount' },
-  { id: 'bank_balance',    label: 'Hide Bank balances' },
-  { id: 'overhead_net',    label: 'Hide Overhead + Net Profit' },
-  { id: 'aging_90',        label: 'Hide 90+ aging' },
-  { id: 'kpi_values',      label: 'Hide KPI values' },
+  // Headline financial numbers
+  { id: 'revenue_dollar',     label: 'Hide Revenue $' },
+  { id: 'gp_dollar',          label: 'Hide GP $' },
+  { id: 'gp_percent',         label: 'Hide GP %' },
+  { id: 'direct_cost',        label: 'Hide Direct Cost $' },
+  { id: 'contract_amount',    label: 'Hide Contract amount' },
+  { id: 'bank_balance',       label: 'Hide Bank balances' },
+  { id: 'overhead_net',       label: 'Hide Overhead + Net Profit' },
+  // Cost bucket breakdown (labor / material / subs / etc.)
+  { id: 'cost_buckets',       label: 'Hide Cost bucket split' },
+  { id: 'labor_hours',        label: 'Hide Labor hours' },
+  // Productivity / earned value
+  { id: 'productivity',       label: 'Hide Productivity / earned-value' },
+  { id: 'rev_per_field_hr',   label: 'Hide Revenue per field hour' },
+  // Retainage
+  { id: 'retainage_held',     label: 'Hide Retainage held' },
+  { id: 'retainage_due',      label: 'Hide Retainage due schedule' },
+  // A/R
+  { id: 'aging_90',           label: 'Hide 90+ aging' },
+  { id: 'ar_email',           label: 'Hide Weekly A/R email settings' },
+  // POs / work orders
+  { id: 'po_list',            label: 'Hide PO list' },
+  { id: 'po_outstanding',     label: 'Hide PO outstanding $' },
+  { id: 'work_orders',        label: 'Hide Service work-orders' },
+  // Payroll
+  { id: 'payroll_detail',     label: 'Hide Payroll register detail' },
+  { id: 'payroll_rates',      label: 'Hide Employee pay rates' },
+  // KPIs
+  { id: 'kpi_values',         label: 'Hide KPI values' },
 ]
 
 export default function OpsPermissionsPage() {
@@ -93,9 +116,13 @@ export default function OpsPermissionsPage() {
                   onChange={(e) => update({ role: e.target.value })}
                 >
                   <option value="admin">Admin</option>
+                  <option value="owner">Owner</option>
                   <option value="manager">Manager</option>
                   <option value="pm">Project manager</option>
                   <option value="finance">Finance</option>
+                  <option value="accountant">Accountant</option>
+                  <option value="payroll">Payroll</option>
+                  <option value="foreman">Foreman</option>
                   <option value="viewer">Viewer</option>
                 </select>
               }

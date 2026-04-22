@@ -403,6 +403,59 @@ export const PAYROLL_LINES = [
   { week:'2026-04-17', emp:'Brian Shea',       trade:'AP2',   job:'2601', jobName:'UConn Gampel Reno',    regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:8, perDiem:  0, rate:28.50 },
   { week:'2026-04-17', emp:'Eric Pires',       trade:'PM',    job:'D101', jobName:'CCSU Parking Deck',    regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:62.00 },
   { week:'2026-04-17', emp:'Marco Delgado',    trade:'JW',    job:'D118', jobName:'New Haven Pier',       regHrs:40, otHrs: 6, sickHrs:0, vacHrs:0, holHrs:0, perDiem: 80, rate:52.00 },
+
+  // Week ending 2026-04-03 — slightly lighter week with a holiday pop
+  { week:'2026-04-03', emp:'Carlos Rodriguez', trade:'JW',    job:'2430', jobName:'West Haven HS',        regHrs:32, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:8, perDiem:120, rate:52.00 },
+  { week:'2026-04-03', emp:'Tyler O\u2019Brien',  trade:'JW',    job:'2430', jobName:'West Haven HS',        regHrs:32, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:8, perDiem:120, rate:52.00 },
+  { week:'2026-04-03', emp:'Miguel Fuentes',   trade:'AP4',   job:'2430', jobName:'West Haven HS',        regHrs:32, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:8, perDiem:  0, rate:36.50 },
+  { week:'2026-04-03', emp:'Jim Kowalski',     trade:'Fore',  job:'2512', jobName:'Sage Park Apts C',     regHrs:32, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:8, perDiem:100, rate:58.00 },
+  { week:'2026-04-03', emp:'Andre Chen',       trade:'JW',    job:'2512', jobName:'Sage Park Apts C',     regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-04-03', emp:'Kevin Doyle',      trade:'Fore',  job:'2544', jobName:'Hartford Municipal',   regHrs:32, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:8, perDiem:  0, rate:58.00 },
+  { week:'2026-04-03', emp:'Rashid Ali',       trade:'JW',    job:'2580', jobName:'Watertown Courthouse', regHrs:32, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:8, perDiem: 90, rate:52.00 },
+  { week:'2026-04-03', emp:'Eric Pires',       trade:'PM',    job:'D101', jobName:'CCSU Parking Deck',    regHrs:32, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:8, perDiem:  0, rate:62.00 },
+
+  // Week ending 2026-03-27 — normal week, some vac time taken
+  { week:'2026-03-27', emp:'Carlos Rodriguez', trade:'JW',    job:'2430', jobName:'West Haven HS',        regHrs:40, otHrs: 4, sickHrs:0, vacHrs:0, holHrs:0, perDiem:120, rate:52.00 },
+  { week:'2026-03-27', emp:'Tyler O\u2019Brien',  trade:'JW',    job:'2430', jobName:'West Haven HS',        regHrs:32, otHrs: 0, sickHrs:0, vacHrs:8, holHrs:0, perDiem:120, rate:52.00 },
+  { week:'2026-03-27', emp:'Jim Kowalski',     trade:'Fore',  job:'2512', jobName:'Sage Park Apts C',     regHrs:40, otHrs: 2, sickHrs:0, vacHrs:0, holHrs:0, perDiem:100, rate:58.00 },
+  { week:'2026-03-27', emp:'Andre Chen',       trade:'JW',    job:'2512', jobName:'Sage Park Apts C',     regHrs:40, otHrs: 4, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-03-27', emp:'Luis Ortega',      trade:'AP3',   job:'2512', jobName:'Sage Park Apts C',     regHrs:40, otHrs: 2, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:32.00 },
+  { week:'2026-03-27', emp:'Nate Hollis',      trade:'JW',    job:'2544', jobName:'Hartford Municipal',   regHrs:40, otHrs: 6, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-03-27', emp:'Kevin Doyle',      trade:'Fore',  job:'2544', jobName:'Hartford Municipal',   regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:58.00 },
+  { week:'2026-03-27', emp:'Rashid Ali',       trade:'JW',    job:'2580', jobName:'Watertown Courthouse', regHrs:32, otHrs: 0, sickHrs:8, vacHrs:0, holHrs:0, perDiem: 90, rate:52.00 },
+  { week:'2026-03-27', emp:'Marco Delgado',    trade:'JW',    job:'D101', jobName:'CCSU Parking Deck',    regHrs:40, otHrs: 8, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+
+  // Week ending 2026-03-20 — heavy OT week on Hartford
+  { week:'2026-03-20', emp:'Carlos Rodriguez', trade:'JW',    job:'2430', jobName:'West Haven HS',        regHrs:40, otHrs: 2, sickHrs:0, vacHrs:0, holHrs:0, perDiem:120, rate:52.00 },
+  { week:'2026-03-20', emp:'Jim Kowalski',     trade:'Fore',  job:'2544', jobName:'Hartford Municipal',   regHrs:40, otHrs:12, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:58.00 },
+  { week:'2026-03-20', emp:'Nate Hollis',      trade:'JW',    job:'2544', jobName:'Hartford Municipal',   regHrs:40, otHrs:10, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-03-20', emp:'Kevin Doyle',      trade:'Fore',  job:'2544', jobName:'Hartford Municipal',   regHrs:40, otHrs:14, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:58.00 },
+  { week:'2026-03-20', emp:'Andre Chen',       trade:'JW',    job:'2512', jobName:'Sage Park Apts C',     regHrs:40, otHrs: 4, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-03-20', emp:'Luis Ortega',      trade:'AP3',   job:'2512', jobName:'Sage Park Apts C',     regHrs:36, otHrs: 0, sickHrs:4, vacHrs:0, holHrs:0, perDiem:  0, rate:32.00 },
+  { week:'2026-03-20', emp:'Eric Pires',       trade:'PM',    job:'D101', jobName:'CCSU Parking Deck',    regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:62.00 },
+  { week:'2026-03-20', emp:'Marco Delgado',    trade:'JW',    job:'D101', jobName:'CCSU Parking Deck',    regHrs:40, otHrs: 6, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+
+  // Week ending 2026-03-13 — flu season — sick time spike
+  { week:'2026-03-13', emp:'Carlos Rodriguez', trade:'JW',    job:'2430', jobName:'West Haven HS',        regHrs:24, otHrs: 0, sickHrs:16,vacHrs:0, holHrs:0, perDiem:120, rate:52.00 },
+  { week:'2026-03-13', emp:'Tyler O\u2019Brien',  trade:'JW',    job:'2430', jobName:'West Haven HS',        regHrs:40, otHrs: 2, sickHrs:0, vacHrs:0, holHrs:0, perDiem:120, rate:52.00 },
+  { week:'2026-03-13', emp:'Miguel Fuentes',   trade:'AP4',   job:'2430', jobName:'West Haven HS',        regHrs:32, otHrs: 0, sickHrs:8, vacHrs:0, holHrs:0, perDiem:  0, rate:36.50 },
+  { week:'2026-03-13', emp:'Jim Kowalski',     trade:'Fore',  job:'2512', jobName:'Sage Park Apts C',     regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem:100, rate:58.00 },
+  { week:'2026-03-13', emp:'Andre Chen',       trade:'JW',    job:'2512', jobName:'Sage Park Apts C',     regHrs:24, otHrs: 0, sickHrs:16,vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-03-13', emp:'Kevin Doyle',      trade:'Fore',  job:'2544', jobName:'Hartford Municipal',   regHrs:40, otHrs: 2, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:58.00 },
+  { week:'2026-03-13', emp:'Rashid Ali',       trade:'JW',    job:'2580', jobName:'Watertown Courthouse', regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem: 90, rate:52.00 },
+  { week:'2026-03-13', emp:'Marco Delgado',    trade:'JW',    job:'D101', jobName:'CCSU Parking Deck',    regHrs:40, otHrs: 4, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+
+  // Week ending 2026-03-06 — spring break vac usage
+  { week:'2026-03-06', emp:'Carlos Rodriguez', trade:'JW',    job:'2430', jobName:'West Haven HS',        regHrs:40, otHrs: 2, sickHrs:0, vacHrs:0, holHrs:0, perDiem:120, rate:52.00 },
+  { week:'2026-03-06', emp:'Tyler O\u2019Brien',  trade:'JW',    job:'2430', jobName:'West Haven HS',        regHrs: 0, otHrs: 0, sickHrs:0, vacHrs:40,holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-03-06', emp:'Jim Kowalski',     trade:'Fore',  job:'2512', jobName:'Sage Park Apts C',     regHrs:40, otHrs: 4, sickHrs:0, vacHrs:0, holHrs:0, perDiem:100, rate:58.00 },
+  { week:'2026-03-06', emp:'Andre Chen',       trade:'JW',    job:'2512', jobName:'Sage Park Apts C',     regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-03-06', emp:'Luis Ortega',      trade:'AP3',   job:'2512', jobName:'Sage Park Apts C',     regHrs: 0, otHrs: 0, sickHrs:0, vacHrs:40,holHrs:0, perDiem:  0, rate:32.00 },
+  { week:'2026-03-06', emp:'Nate Hollis',      trade:'JW',    job:'2544', jobName:'Hartford Municipal',   regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-03-06', emp:'Kevin Doyle',      trade:'Fore',  job:'2544', jobName:'Hartford Municipal',   regHrs:40, otHrs: 2, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:58.00 },
+  { week:'2026-03-06', emp:'Rashid Ali',       trade:'JW',    job:'2580', jobName:'Watertown Courthouse', regHrs: 0, otHrs: 0, sickHrs:0, vacHrs:40,holHrs:0, perDiem:  0, rate:52.00 },
+  { week:'2026-03-06', emp:'Eric Pires',       trade:'PM',    job:'D101', jobName:'CCSU Parking Deck',    regHrs:40, otHrs: 0, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:62.00 },
+  { week:'2026-03-06', emp:'Marco Delgado',    trade:'JW',    job:'D101', jobName:'CCSU Parking Deck',    regHrs:40, otHrs: 2, sickHrs:0, vacHrs:0, holHrs:0, perDiem:  0, rate:52.00 },
 ]
 
 export function computePayroll(line) {
@@ -487,7 +540,7 @@ export const AR_EMAIL_DEFAULTS = {
 //  Permissions — synced users
 // --------------------------------------------------------------------
 export const PERM_USERS = [
-  { sparksId:'sp_3841', name:'Angelina DuBaldo', email:'angelina@dubaldo.com', role:'admin',   pcs:['DDE','DCM','SILK'], hiddenTabs:[], hiddenFields:[], jobAccess:'all' },
+  { sparksId:'sp_3841', name:'Angalena DuBaldo', email:'angalena@dubaldo.com', role:'admin',   pcs:['DDE','DCM','SILK'], hiddenTabs:[], hiddenFields:[], jobAccess:'all' },
   { sparksId:'sp_3901', name:'Paulette Anderson', email:'paulette@dubaldo.com', role:'finance', pcs:['DDE','DCM','SILK'], hiddenTabs:[], hiddenFields:[], jobAccess:'all' },
   { sparksId:'sp_4012', name:'Dan Mulligan',      email:'dan@dubaldo.com',      role:'pm',      pcs:['DDE'],              hiddenTabs:['ar','ap'], hiddenFields:[], jobAccess:'assigned' },
   { sparksId:'sp_4298', name:'Paul Diliberto',    email:'paul@dubaldo.com',     role:'manager', pcs:['DCM'],              hiddenTabs:[], hiddenFields:[], jobAccess:'all' },

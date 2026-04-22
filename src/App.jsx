@@ -81,7 +81,8 @@ function AppRoutes() {
           <Route path="ap"          element={<OpsApPage />} />
           <Route path="kpis"        element={<OpsKpisPage />} />
           <Route path="payroll"     element={<OpsPayrollPage />} />
-          <Route path="permissions" element={<OpsPermissionsPage />} />
+          {/* Permissions — admin only.  Non-admin users can't even see the tab. */}
+          <Route path="permissions" element={<ProtectedRoute adminOnly><OpsPermissionsPage /></ProtectedRoute>} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/leaderboard" />} />

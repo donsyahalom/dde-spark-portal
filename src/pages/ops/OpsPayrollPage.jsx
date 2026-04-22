@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react'
+import { Line } from 'react-chartjs-2'
 import OpsSectionCard from '../../components/ops/OpsSectionCard'
+import OpsChartBox from '../../components/ops/OpsChartBox'
 import { useOpsData, computePayroll } from '../../hooks/useOpsData'
 import { fmt } from '../../lib/opsFormat'
+import { moneyLineOpts, PALETTE } from '../../lib/opsChartOpts'
 
 // Fields we sum when grouping.  Every numeric line comes through here
 // so "by employee" and "by job" stay in sync — adding a new burden
@@ -75,10 +78,70 @@ function fmtCell(val, unit) {
 }
 
 export default function OpsPayrollPage() {
-  const { payrollLines } = useOpsData()
+  const { payrollLines, jobs } = useOpsData()
   const [mode, setMode]     = useState('employee') // 'employee' | 'job'
   const [q, setQ]           = useState('')
   const [weekFilter, setWf] = useState('all')
+  // Time-series viz — which contract job to slice by ("all" aggregates
+  // across every contract job in view).
+  const [tsJob, setTsJob]   = useState('all')
+
+  // Set of contract-job numbers — used to filter non-reg payroll dollars
+  // into the time-series chart.  Service jobs are excluded because the
+  // user asked specifically for contract-job curves.
+  const contractJobNums = useMemo(() => {
+    return new Set(jobs.filter((j) => j.type === 'contract').map((j) => j.num))
+  }, [jobs])
+
+  // Job option list for the selector — only contract jobs that actually
+  // appear in payroll data this period.
+  const contractJobOptions = useMemo(() => {
+    const seen = new Map()
+    for (const l of payrollLines) {
+      if (!contractJobNums.has(l.job)) continue
+      if (!seen.has(l.job)) seen.set(l.job, l.jobName)
+    }
+    return Array.from(seen.entries()).map(([num, name]) => ({ num, name }))
+  }, [payrollLines, contractJobNums])
+
+  // Build the weekly rollup of non-regular payroll $ for the chart.
+  // Series: OT / Sick / Vacation / Holiday (all in wage dollars).
+  // Regular pay is explicitly excluded per the product request — this
+  // chart is about exception / leave spending patterns.
+  const tsData = useMemo(() => {
+    const byWeek = new Map() // week → {ot, sick, vac, hol}
+    for (const raw of payrollLines) {
+      if (!contractJobNums.has(raw.job)) continue
+      if (tsJob !== 'all' && raw.job !== tsJob) continue
+      const p = computePayroll(raw)
+      if (!byWeek.has(p.week)) byWeek.set(p.week, { ot: 0, sick: 0, vac: 0, hol: 0 })
+      const w = byWeek.get(p.week)
+      w.ot   += p.otPay
+      w.sick += p.sickPay
+      w.vac  += p.vacPay
+      w.hol  += p.holPay
+    }
+    const weeks = Array.from(byWeek.keys()).sort()
+    return {
+      labels: weeks,
+      datasets: [
+        { label: 'OT $',       data: weeks.map((w) => Math.round(byWeek.get(w).ot)),
+          borderColor: PALETTE.red,    backgroundColor: 'rgba(224,85,85,0.10)',
+          fill: false, tension: 0.3, borderWidth: 2 },
+        { label: 'Sick $',     data: weeks.map((w) => Math.round(byWeek.get(w).sick)),
+          borderColor: PALETTE.amber,  backgroundColor: 'transparent',
+          fill: false, tension: 0.3, borderWidth: 2 },
+        { label: 'Vacation $', data: weeks.map((w) => Math.round(byWeek.get(w).vac)),
+          borderColor: PALETTE.blue,   backgroundColor: 'transparent',
+          fill: false, tension: 0.3, borderWidth: 2 },
+        { label: 'Holiday $',  data: weeks.map((w) => Math.round(byWeek.get(w).hol)),
+          borderColor: PALETTE.gold,   backgroundColor: 'transparent',
+          fill: false, tension: 0.3, borderWidth: 2 },
+      ],
+    }
+  }, [payrollLines, contractJobNums, tsJob])
+
+  const tsOpts = useMemo(() => moneyLineOpts(), [])
 
   const weeks = useMemo(
     () => Array.from(new Set(payrollLines.map((l) => l.week))).sort(),
@@ -142,6 +205,35 @@ export default function OpsPayrollPage() {
           <div className="ops-small ops-text-dim">wages + burden + per diem</div>
         </OpsSectionCard>
       </div>
+
+      {/* ── Non-regular payroll $ over time — by contract job ────── */}
+      <OpsSectionCard
+        title="Non-regular payroll $ over time"
+        subtitle="OT, Sick, Vacation and Holiday wage dollars by week. Regular pay excluded so exception-spending patterns stand out. Scoped to contract jobs."
+        right={
+          <select
+            className="ops-select"
+            value={tsJob}
+            onChange={(e) => setTsJob(e.target.value)}
+            style={{ minWidth: 220 }}
+          >
+            <option value="all">All contract jobs</option>
+            {contractJobOptions.map((j) => (
+              <option key={j.num} value={j.num}>{j.num} — {j.name}</option>
+            ))}
+          </select>
+        }
+      >
+        {tsData.labels.length === 0 ? (
+          <div className="ops-small ops-text-dim" style={{ padding: '12px 0' }}>
+            No contract-job payroll data for the current selection.
+          </div>
+        ) : (
+          <OpsChartBox size="lg">
+            <Line data={tsData} options={tsOpts} />
+          </OpsChartBox>
+        )}
+      </OpsSectionCard>
 
       <OpsSectionCard
         title="Payroll register"

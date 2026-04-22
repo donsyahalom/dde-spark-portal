@@ -1,145 +1,109 @@
-# DDE Spark Portal 🌟
+# dde-spark-ops-batch5
 
-A recognition platform for D. DuBaldo Electric — employees give sparks to recognize each other.
+Drop-in updates on top of the UAT repo.  Overwrite each file in
+`sparks/dde-spark-portal-uat/src/...` with the matching file in this
+folder (paths inside `src/` match one-for-one).
 
-## Features
-- 🏆 Live leaderboard (sort by name or ranking)
-- ✨ Employees give up to 2 sparks/day to colleagues
-- ⏳ Vesting system: sparks vest X days after assignment (not hire date)
-- 🔑 Password change on first login
-- 👤 Admin dashboard: add/edit/remove employees, batch import, spark adjustment, reports
-- 📊 Admin reports: who gave sparks to whom, totals by date range
-- 📱 Mobile-optimized design
-- ⚡ Real-time updates via Supabase
+## What this batch ships
 
----
+1. **Overview — 2nd row of cards**
+   `src/pages/ops/OpsOverviewPage.jsx`
+   New row under the top KPI grid with Company productivity,
+   Revenue per field hour, Retainage held, and Retainage due
+   (next 30 days — derived from `pctCmp >= 95` release schedule).
 
-## Deployment Instructions
+2. **Weekly A/R email — collapsible + admin-only**
+   `src/pages/ops/OpsArPage.jsx`
+   Collapsed by default.  Expand button reveals schedule / recipients /
+   subject / preview.  Section is hidden entirely for non-admin users
+   (`currentUser.is_admin` check via `useAuth()`).
 
-### Step 1 — Set Up Supabase (Database)
+3. **Permissions tab — admin-only**
+   `src/App.jsx`, `src/components/ops/OpsLayout.jsx`
+   Route gated with `<ProtectedRoute adminOnly>`; tab is filtered out
+   of the Ops subnav for non-admins.
 
-1. Go to [supabase.com](https://supabase.com) and **Create a new project**
-   - Name: `dde-spark-portal`
-   - Database password: save this somewhere safe
-   - Region: pick closest to your team
+4. **A/R aging — new columns + days/months toggle + tooltips**
+   `src/pages/ops/OpsArPage.jsx`, `src/lib/opsEmailTemplate.js`
+   - Buckets are now **Current / 1-30 / 31-60 / 61-90 / >90**
+     (91-120 and >120 collapsed into `>90`).
+   - **Days / Months** toggle on the aging section.  Months mode
+     buckets by actual invoice month — today's month is *Current*,
+     then the three prior months as labelled columns, then *Older*.
+   - **Retainage** column added to the Contract (AR) table only
+     (rolled up from `jobs[].retainageHeld` per customer).
+   - Hover any cell to see the invoices behind it — **invoice #,
+     invoice date, amount**.
+   - Email (`buildArEmailHtml`) still renders days-mode bucketed
+     tables; API is backward-compatible via `AGING_BUCKETS` alias.
 
-2. Once the project is created, go to **SQL Editor** (left sidebar)
+5. **Payroll — non-regular $ time-series**
+   `src/pages/ops/OpsPayrollPage.jsx`, `src/lib/opsMockData.js`
+   New section under the summary cards: line chart with OT $,
+   Sick $, Vacation $, Holiday $ by week.  Regular pay explicitly
+   excluded so exception-spending patterns stand out.  Job selector
+   scopes the chart to a single contract job or all contract jobs.
+   Mock data was extended back through 2026-03-06 so the curves have
+   6 weeks of signal (holiday / normal / OT-heavy / flu / spring
+   break / current).
 
-3. Click **"New Query"** and paste the entire contents of `supabase-schema.sql`
+6. **KPIs — Add KPI supports time-series**
+   `src/pages/ops/OpsKpisPage.jsx`
+   Single value vs Time series toggle on the Add KPI form.  In
+   time-series mode you enter one or more **period + value** rows;
+   the saved KPI renders as its own sparkline (last point shown as
+   the headline value).  Persisted to `localStorage` under key
+   `dde.ops.customKpis.v2` until the DB table lands.
 
-4. Click **Run** — this creates all tables and the default admin account
-
-5. Go to **Settings → API** and copy:
-   - **Project URL** (looks like `https://xxxxxxxxxxxx.supabase.co`)
-   - **anon public key** (long string under "Project API Keys")
-
----
-
-### Step 2 — Push Code to GitHub
-
-1. Create a new GitHub repository at [github.com/new](https://github.com/new)
-   - Name: `dde-spark-portal`
-   - Private or Public (your choice)
-
-2. In your terminal, from this project folder:
-```bash
-git init
-git add .
-git commit -m "Initial commit - DDE Spark Portal"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/dde-spark-portal.git
-git push -u origin main
-```
-
----
-
-### Step 3 — Deploy on Netlify
-
-1. Go to [netlify.com](https://netlify.com) and log in / create account
-
-2. Click **"Add new site" → "Import an existing project"**
-
-3. Connect to **GitHub** and select your `dde-spark-portal` repository
-
-4. Build settings (should auto-detect from `netlify.toml`):
-   - Build command: `npm run build`
-   - Publish directory: `dist`
-
-5. Click **"Add environment variables"** (or go to Site Settings → Environment Variables after deploy):
+   **Future DB schema (noted in the page's top comment):**
    ```
-   VITE_SUPABASE_URL     = https://your-project-id.supabase.co
-   VITE_SUPABASE_ANON_KEY = your-anon-key-here
+   kpi(id, name, kind ['single'|'timeseries'], value, color, created_at, created_by)
+   kpi_point(id, kpi_id, period, value, note)
    ```
 
-6. Click **"Deploy site"**
+7. **Permissions tab — updated options**
+   `src/pages/ops/OpsPermissionsPage.jsx`
+   - Added `Payroll` to the tab-visibility list.
+   - Added new field-masking toggles: GP %, Direct Cost, Cost bucket
+     split, Labor hours, Productivity / earned-value, Revenue per
+     field hour, Retainage held, Retainage due schedule, Weekly A/R
+     email settings, PO list, PO outstanding $, Service work-orders,
+     Payroll register detail, Employee pay rates.
+   - Expanded role dropdown: Admin, Owner, Manager, PM, Finance,
+     Accountant, Payroll, Foreman, Viewer.
 
-7. Your site will be live at `https://random-name.netlify.app` — you can set a custom domain in Netlify settings.
+8. **Mock data fixes**
+   `src/lib/opsMockData.js`
+   - Fixed *Angalena* DuBaldo spelling (was *Angelina*) on the
+     PERM_USERS row (name + email).
+   - Added 5 additional weeks of PAYROLL_LINES (2026-04-03 through
+     2026-03-06) so the time-series viz has real signal.
 
----
+## Install
 
-### Step 4 — Local Development (Optional)
+1. Unzip over the UAT repo.  Every file keeps its existing path under
+   `src/` — the overwrite map is:
+   ```
+   src/App.jsx
+   src/components/ops/OpsLayout.jsx
+   src/lib/opsEmailTemplate.js
+   src/lib/opsMockData.js
+   src/pages/ops/OpsArPage.jsx
+   src/pages/ops/OpsKpisPage.jsx
+   src/pages/ops/OpsOverviewPage.jsx
+   src/pages/ops/OpsPayrollPage.jsx
+   src/pages/ops/OpsPermissionsPage.jsx
+   ```
+2. No new dependencies — nothing to `npm install`.
+3. `npm run build` should pass.  Netlify will pick it up automatically
+   on the next push.
 
-```bash
-# Install dependencies
-npm install
+## Notes
 
-# Create your .env file
-cp .env.example .env
-# Edit .env and add your Supabase URL and anon key
-
-# Run development server
-npm run dev
-```
-
----
-
-## Default Login Credentials
-
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | admin@dde.com | admin123 |
-| New Employees | (their email) | spark123 |
-
-> Both admin and employees are prompted to change their password on first login.
-
----
-
-## How Sparks Work
-
-1. **Daily Allowance**: Every employee gets 2 sparks to give per day (resets at midnight)
-2. **Giving**: Select a colleague and assign 1–2 sparks (max 2 total per day)
-3. **Vesting**: Sparks are added as "unvested" and move to "vested" after the vesting period (default 30 days from the day they were assigned)
-4. **Leaderboard**: Shows all sparks (vested + unvested) ranked or alphabetically
-
----
-
-## Admin Capabilities
-
-- Add employees individually or via CSV batch import
-- Remove employees
-- Edit any employee's vested and unvested spark totals
-- Adjust vesting period (global setting)
-- Run reports filtered by date range showing who gave sparks to whom
-
----
-
-## Tech Stack
-
-- **Frontend**: React 18 + Vite
-- **Backend/DB**: Supabase (PostgreSQL + Realtime)
-- **Hosting**: Netlify
-- **Fonts**: Cinzel + Lato (Google Fonts)
-
----
-
-## CSV Batch Import Format
-
-```
-FirstName, LastName, Phone, Email, InitialSparks, DailyAccrual
-John, Smith, 555-1234, john.smith@dde.com, 10, 0
-Jane, Doe, 555-5678, jane.doe@dde.com, 5, 1
-```
-
-All imported employees will have:
-- Password: `spark123` (must change on first login)
-- Initial sparks added as unvested (will vest after vesting period)
+- All new UI reads only from the existing `useOpsData()` hook plus
+  `useAuth()`; no new context providers or Supabase calls are
+  introduced in this batch.
+- The A/R email HTML output is unchanged visually — same Sage-style
+  days buckets with the new `Current / 1-30 / 31-60 / 61-90 / >90`
+  labels.  Recipients will see the same email, just with the renamed
+  buckets.

@@ -1,24 +1,32 @@
-// Weekly A/R email — HTML template.
+// Weekly A/R email — HTML template + aging helpers.
 // -----------------------------------------------------------------------
-// This module is used in two places:
+// This module is used in three places:
 //   1) The Preview button on OpsArPage renders the output directly into
 //      an iframe's srcDoc (so the user sees exactly what recipients get).
 //   2) The future server-side weekly job (Supabase edge fn / Netlify fn)
 //      imports the same helper so the email body stays in one spot.
+//   3) OpsArPage's in-page Sage-style aging tables import the bucketing
+//      helpers so the on-screen tables stay in lock-step with the email.
 //
 // Email clients (Outlook especially) only reliably render inline styles
 // on table + basic block elements.  Everything here stays email-safe:
 // no external stylesheet, no flexbox/grid, no background-images.
 // -----------------------------------------------------------------------
 
-// Sage aging buckets — ordered.  Keep the min/max inclusive.
-export const AGING_BUCKETS = [
-  { label: '0-30',    min: 0,    max: 30  },
-  { label: '31-60',   min: 31,   max: 60  },
-  { label: '61-90',   min: 61,   max: 90  },
-  { label: '91-120',  min: 91,   max: 120 },
-  { label: '>120',    min: 121,  max: 9999 },
+// Sage aging buckets — days mode.  Ordered, min/max inclusive.
+//   • "Current" is anything not yet overdue (daysLate === 0).
+//   • The tail end collapses 91-120 + >120 into a single ">90" column.
+export const DAYS_BUCKETS = [
+  { label: 'Current', min: 0,   max: 0    },
+  { label: '1-30',    min: 1,   max: 30   },
+  { label: '31-60',   min: 31,  max: 60   },
+  { label: '61-90',   min: 61,  max: 90   },
+  { label: '>90',     min: 91,  max: 9999 },
 ]
+
+// Back-compat alias — older code referenced AGING_BUCKETS directly.
+// Keep both names exported so existing imports keep compiling.
+export const AGING_BUCKETS = DAYS_BUCKETS
 
 const $ = (n) => (n == null ? '—'
   : `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`)
@@ -33,23 +41,99 @@ export function daysLateOf(inv, asOf = new Date()) {
   return Math.max(0, days)
 }
 
-// Roll up invoices into {customer, 0-30, 31-60, ..., total} rows for
-// the Sage-style aging grid.  Customer key dedupes by exact string.
-export function agingByCustomer(invoices, asOf = new Date()) {
+// --------------------------------------------------------------------
+//  Month-based aging buckets
+// --------------------------------------------------------------------
+// Sage-style "months" view: current month, 3 prior named months, then
+// an Older catch-all.  Buckets are generated relative to `asOf` so the
+// labels automatically roll forward over time.
+//   Apr 21, 2026  → [Current (Apr), Mar, Feb, Jan, Older]
+//   Jun 3,  2026  → [Current (Jun), May, Apr, Mar, Older]
+// The Current column includes "future-dated" invoices too (ie any
+// invoice whose invDate is in the current month or later).
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
+export function buildMonthBuckets(asOf = new Date()) {
+  const curY = asOf.getFullYear()
+  const curM = asOf.getMonth() // 0-based
+  const at = (offset) => {
+    const m = ((curM - offset) % 12 + 12) % 12
+    const y = curY + Math.floor((curM - offset) / 12)
+    return { m, y }
+  }
+  const cur = at(0)
+  const m1  = at(1)
+  const m2  = at(2)
+  const m3  = at(3)
+  return [
+    { label: 'Current',                      year: cur.y, month: cur.m, kind: 'current' },
+    { label: `${MONTH_NAMES[m1.m]} ${m1.y}`, year: m1.y,  month: m1.m,  kind: 'month'   },
+    { label: `${MONTH_NAMES[m2.m]} ${m2.y}`, year: m2.y,  month: m2.m,  kind: 'month'   },
+    { label: `${MONTH_NAMES[m3.m]} ${m3.y}`, year: m3.y,  month: m3.m,  kind: 'month'   },
+    { label: 'Older',                        year: null,  month: null,  kind: 'older'   },
+  ]
+}
+
+// Return the bucket index (into buildMonthBuckets(asOf)) for a given
+// invoice.  Invoices in the current month or newer land in Current.
+export function monthBucketIndex(inv, asOf = new Date()) {
+  const buckets = buildMonthBuckets(asOf)
+  if (!inv.invDate) return buckets.length - 1 // Older
+  const d = new Date(inv.invDate + 'T00:00:00')
+  const invY = d.getFullYear()
+  const invM = d.getMonth()
+  const curY = asOf.getFullYear()
+  const curM = asOf.getMonth()
+  // Current month or later → Current bucket
+  if (invY > curY || (invY === curY && invM >= curM)) return 0
+  for (let i = 1; i < buckets.length; i++) {
+    const b = buckets[i]
+    if (b.kind === 'month' && invY === b.year && invM === b.month) return i
+  }
+  return buckets.length - 1 // Older
+}
+
+// --------------------------------------------------------------------
+//  Aging rollup by customer
+// --------------------------------------------------------------------
+// Unified helper that handles both 'days' and 'months' modes.
+// Returns an array of rows:
+//   {
+//     customer,
+//     buckets: [ { amount, invoices:[{invoice,invDate,balance}] }, ... ],
+//     total,
+//   }
+// Each bucket carries the list of invoices making up its $ amount so the
+// hover tooltip can show invoice #, date, amount.
+export function agingByCustomer(invoices, opts = {}) {
+  const { asOf = new Date(), mode = 'days' } = opts
+  const bucketDefs = mode === 'months' ? buildMonthBuckets(asOf) : DAYS_BUCKETS
   const map = new Map()
   for (const inv of invoices) {
     const key = inv.customer || inv.job || '—'
     if (!map.has(key)) {
       map.set(key, {
         customer: key,
-        buckets:  AGING_BUCKETS.map(() => 0),
+        buckets:  bucketDefs.map(() => ({ amount: 0, invoices: [] })),
         total:    0,
       })
     }
     const row = map.get(key)
-    const dl  = daysLateOf(inv, asOf)
-    const bi  = AGING_BUCKETS.findIndex((b) => dl >= b.min && dl <= b.max)
-    if (bi >= 0) row.buckets[bi] += inv.balance
+    let bi
+    if (mode === 'months') {
+      bi = monthBucketIndex(inv, asOf)
+    } else {
+      const dl = daysLateOf(inv, asOf)
+      bi = bucketDefs.findIndex((b) => dl >= b.min && dl <= b.max)
+    }
+    if (bi >= 0) {
+      row.buckets[bi].amount += inv.balance
+      row.buckets[bi].invoices.push({
+        invoice: inv.invoice,
+        invDate: inv.invDate,
+        balance: inv.balance,
+      })
+    }
     row.total += inv.balance
   }
   return Array.from(map.values()).sort((a, b) => b.total - a.total)
@@ -63,27 +147,28 @@ export function sortByDaysLateDesc(invoices, asOf = new Date()) {
     .sort((a, b) => b.daysLate - a.daysLate)
 }
 
-// ── Table builders (return HTML strings; all styles inline) ─────────
+// ── Table builders for email (days mode only; inline styles) ─────────
 
-function agingTableHtml(title, rows) {
+function agingTableHtml(title, rows, bucketDefs) {
   if (!rows.length) {
     return `<p style="margin:8px 0; color:#666; font-size:13px;">No open ${title.toLowerCase()} invoices.</p>`
   }
-  const colHeads = AGING_BUCKETS.map((b) =>
-    `<th align="right" style="padding:6px 10px; background:#eee; border:1px solid #ccc; font-size:12px;">${b.label}</th>`
+  const colHeads = bucketDefs.map((b) =>
+    `<th align="right" style="padding:6px 10px; background:#eee; border:1px solid #ccc; font-size:12px;">${escapeHtml(b.label)}</th>`
   ).join('')
   const body = rows.map((r) => {
-    const cells = r.buckets.map((v) =>
-      `<td align="right" style="padding:6px 10px; border:1px solid #ccc; font-size:12px; color:${v > 0 ? '#000' : '#aaa'}">${v > 0 ? $(v) : '—'}</td>`
-    ).join('')
+    const cells = r.buckets.map((c) => {
+      const v = c.amount
+      return `<td align="right" style="padding:6px 10px; border:1px solid #ccc; font-size:12px; color:${v > 0 ? '#000' : '#aaa'}">${v > 0 ? $(v) : '—'}</td>`
+    }).join('')
     return `<tr>
       <td style="padding:6px 10px; border:1px solid #ccc; font-size:12px;">${escapeHtml(r.customer)}</td>
       ${cells}
       <td align="right" style="padding:6px 10px; border:1px solid #ccc; font-size:12px; font-weight:700;">${$(r.total)}</td>
     </tr>`
   }).join('')
-  const totalsPerBucket = AGING_BUCKETS.map((_, i) =>
-    rows.reduce((s, r) => s + r.buckets[i], 0)
+  const totalsPerBucket = bucketDefs.map((_, i) =>
+    rows.reduce((s, r) => s + r.buckets[i].amount, 0)
   )
   const grandTotal = rows.reduce((s, r) => s + r.total, 0)
   const totalsRow = `<tr>
@@ -154,8 +239,8 @@ function escapeHtml(s) {
 export function buildArEmailHtml({ invoices, asOf = new Date(), subject = 'Weekly A/R aging' }) {
   const ar = invoices.filter((i) => i.type === 'AR')
   const sr = invoices.filter((i) => i.type === 'SR')
-  const arAging = agingByCustomer(ar, asOf)
-  const srAging = agingByCustomer(sr, asOf)
+  const arAging = agingByCustomer(ar, { asOf })
+  const srAging = agingByCustomer(sr, { asOf })
   const arList  = sortByDaysLateDesc(ar, asOf)
   const srList  = sortByDaysLateDesc(sr, asOf)
   const dateStr = asOf.toISOString().slice(0, 10)
@@ -183,11 +268,11 @@ export function buildArEmailHtml({ invoices, asOf = new Date(), subject = 'Weekl
       </p>
 
       <!-- AR (contract) -->
-      ${agingTableHtml('A/R aging — Contract (AR)', arAging)}
+      ${agingTableHtml('A/R aging — Contract (AR)', arAging, DAYS_BUCKETS)}
       ${invoiceListHtml('Open AR invoices — sorted by days late', arList)}
 
       <!-- SR (service) -->
-      ${agingTableHtml('A/R aging — Service (SR)', srAging)}
+      ${agingTableHtml('A/R aging — Service (SR)', srAging, DAYS_BUCKETS)}
       ${invoiceListHtml('Open SR invoices — sorted by days late', srList)}
     </td></tr>
     <tr>
