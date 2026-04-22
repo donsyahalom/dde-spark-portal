@@ -135,35 +135,35 @@ function AgingTable({ title, rows, bucketLabels, retainageByCust, emptyMsg }) {
           <thead>
             <tr>
               <th>Customer</th>
+              {retainageByCust && <th className="right">Retainage</th>}
               {bucketLabels.map((lbl) => <th key={lbl} className="right">{lbl}</th>)}
               <th className="right">Total</th>
-              {retainageByCust && <th className="right">Retainage</th>}
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.customer}>
                 <td>{r.customer}</td>
-                {r.buckets.map((c, i) => (
-                  <AgingCell key={i} amount={c.amount} invoices={c.invoices} />
-                ))}
-                <td className="right" style={{ fontWeight: 700 }}>{fmt(r.total)}</td>
                 {retainageByCust && (
                   <td className="right ops-text-warn" style={{ fontWeight: 600 }}>
                     {retainageByCust[r.customer] ? fmt(retainageByCust[r.customer]) : '—'}
                   </td>
                 )}
+                {r.buckets.map((c, i) => (
+                  <AgingCell key={i} amount={c.amount} invoices={c.invoices} />
+                ))}
+                <td className="right" style={{ fontWeight: 700 }}>{fmt(r.total)}</td>
               </tr>
             ))}
             <tr style={{ borderTop: '2px solid var(--border-bright)', fontWeight: 700 }}>
               <td>Total</td>
+              {retainageByCust && (
+                <td className="right">{retainageGrand ? fmt(retainageGrand) : '—'}</td>
+              )}
               {totals.map((v, i) => (
                 <td key={i} className="right">{fmt(v)}</td>
               ))}
               <td className="right">{fmt(grand)}</td>
-              {retainageByCust && (
-                <td className="right">{retainageGrand ? fmt(retainageGrand) : '—'}</td>
-              )}
             </tr>
           </tbody>
         </table>
