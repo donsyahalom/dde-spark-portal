@@ -149,20 +149,29 @@ export function sortByDaysLateDesc(invoices, asOf = new Date()) {
 
 // ── Table builders for email (days mode only; inline styles) ─────────
 
-function agingTableHtml(title, rows, bucketDefs) {
+// retainageByCust: optional { [customer]: $ } — when provided adds a Retainage column
+function agingTableHtml(title, rows, bucketDefs, retainageByCust = null) {
   if (!rows.length) {
     return `<p style="margin:8px 0; color:#666; font-size:13px;">No open ${title.toLowerCase()} invoices.</p>`
   }
+  const showRetainage = !!retainageByCust
+  const retainageHead = showRetainage
+    ? `<th align="right" style="padding:6px 10px; background:#fff3cd; border:1px solid #ccc; font-size:12px; color:#856404;">Retainage</th>`
+    : ''
   const colHeads = bucketDefs.map((b) =>
     `<th align="right" style="padding:6px 10px; background:#eee; border:1px solid #ccc; font-size:12px;">${escapeHtml(b.label)}</th>`
   ).join('')
   const body = rows.map((r) => {
+    const retainageCell = showRetainage
+      ? `<td align="right" style="padding:6px 10px; border:1px solid #ccc; font-size:12px; color:#856404; font-weight:600;">${retainageByCust[r.customer] ? $(retainageByCust[r.customer]) : '—'}</td>`
+      : ''
     const cells = r.buckets.map((c) => {
       const v = c.amount
       return `<td align="right" style="padding:6px 10px; border:1px solid #ccc; font-size:12px; color:${v > 0 ? '#000' : '#aaa'}">${v > 0 ? $(v) : '—'}</td>`
     }).join('')
     return `<tr>
       <td style="padding:6px 10px; border:1px solid #ccc; font-size:12px;">${escapeHtml(r.customer)}</td>
+      ${retainageCell}
       ${cells}
       <td align="right" style="padding:6px 10px; border:1px solid #ccc; font-size:12px; font-weight:700;">${$(r.total)}</td>
     </tr>`
@@ -171,8 +180,15 @@ function agingTableHtml(title, rows, bucketDefs) {
     rows.reduce((s, r) => s + r.buckets[i].amount, 0)
   )
   const grandTotal = rows.reduce((s, r) => s + r.total, 0)
+  const retainageGrand = showRetainage
+    ? rows.reduce((s, r) => s + (retainageByCust[r.customer] || 0), 0)
+    : 0
+  const retainageTotalCell = showRetainage
+    ? `<td align="right" style="padding:6px 10px; border:1px solid #ccc; font-size:12px; font-weight:700; background:#fafafa;">${retainageGrand ? $(retainageGrand) : '—'}</td>`
+    : ''
   const totalsRow = `<tr>
     <td style="padding:6px 10px; border:1px solid #ccc; font-size:12px; font-weight:700; background:#fafafa;">Total</td>
+    ${retainageTotalCell}
     ${totalsPerBucket.map((v) =>
       `<td align="right" style="padding:6px 10px; border:1px solid #ccc; font-size:12px; font-weight:700; background:#fafafa;">${$(v)}</td>`
     ).join('')}
@@ -184,6 +200,7 @@ function agingTableHtml(title, rows, bucketDefs) {
       <thead>
         <tr>
           <th align="left" style="padding:6px 10px; background:#eee; border:1px solid #ccc; font-size:12px;">Customer</th>
+          ${retainageHead}
           ${colHeads}
           <th align="right" style="padding:6px 10px; background:#eee; border:1px solid #ccc; font-size:12px;">Total</th>
         </tr>
@@ -235,8 +252,23 @@ function escapeHtml(s) {
 
 // Public API — assembles the full HTML body.
 // invoices = AR_INVOICES (mixed AR + SR).
+// jobs     = optional jobs array for retainage lookup on contract aging.
+// content  = { contractAging, contractDetail, serviceAging, serviceDetail } — all true by default
 // asOf defaults to today but is overridable for unit tests.
-export function buildArEmailHtml({ invoices, asOf = new Date(), subject = 'Weekly A/R aging' }) {
+export function buildArEmailHtml({
+  invoices,
+  jobs = [],
+  asOf = new Date(),
+  subject = 'Weekly A/R aging',
+  content = {},
+}) {
+  const {
+    contractAging  = true,
+    contractDetail = true,
+    serviceAging   = true,
+    serviceDetail  = true,
+  } = content
+
   const ar = invoices.filter((i) => i.type === 'AR')
   const sr = invoices.filter((i) => i.type === 'SR')
   const arAging = agingByCustomer(ar, { asOf })
@@ -244,6 +276,14 @@ export function buildArEmailHtml({ invoices, asOf = new Date(), subject = 'Weekl
   const arList  = sortByDaysLateDesc(ar, asOf)
   const srList  = sortByDaysLateDesc(sr, asOf)
   const dateStr = asOf.toISOString().slice(0, 10)
+
+  // Build retainage lookup from jobs
+  const retainageByCust = {}
+  for (const j of jobs) {
+    if (j.type !== 'contract' || !j.retainageHeld) continue
+    retainageByCust[j.customer] = (retainageByCust[j.customer] || 0) + j.retainageHeld
+  }
+  const hasRetainage = Object.keys(retainageByCust).length > 0
 
   return `<!DOCTYPE html>
 <html>
@@ -267,13 +307,11 @@ export function buildArEmailHtml({ invoices, asOf = new Date(), subject = 'Weekl
         are sorted by days-late (oldest first).
       </p>
 
-      <!-- AR (contract) -->
-      ${agingTableHtml('A/R aging — Contract (AR)', arAging, DAYS_BUCKETS)}
-      ${invoiceListHtml('Open AR invoices — sorted by days late', arList)}
+      ${contractAging ? agingTableHtml('A/R aging — Contract (AR)', arAging, DAYS_BUCKETS, hasRetainage ? retainageByCust : null) : ''}
+      ${contractDetail ? invoiceListHtml('Open AR invoices — sorted by days late', arList) : ''}
 
-      <!-- SR (service) -->
-      ${agingTableHtml('A/R aging — Service (SR)', srAging, DAYS_BUCKETS)}
-      ${invoiceListHtml('Open SR invoices — sorted by days late', srList)}
+      ${serviceAging ? agingTableHtml('A/R aging — Service (SR)', srAging, DAYS_BUCKETS) : ''}
+      ${serviceDetail ? invoiceListHtml('Open SR invoices — sorted by days late', srList) : ''}
     </td></tr>
     <tr>
       <td style="padding:12px 22px; background:#fafafa; border-top:1px solid #ddd; font-size:11px; color:#888;">

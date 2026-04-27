@@ -60,7 +60,7 @@ async function sendViaResend(apiKey: string | undefined, to: string, subject: st
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: 'DDE Spark Portal <sparks@yourdomain.com>', to, subject, html })
+    body: JSON.stringify({ from: 'DDE SPARKS Portal <sparks@yourdomain.com>', to, subject, html })
   })
   const data = await res.json()
   return { ok: res.ok, data }

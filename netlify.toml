@@ -6,3 +6,12 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# ── Scheduled Functions ────────────────────────────────────────────────────────
+# Review reminder emails: daily at 9 AM ET (14:00 UTC)
+[functions."send-review-reminders"]
+  schedule = "0 14 * * *"
+
+# Spark summary/reminder emails: runs every hour, function decides if it should act
+[functions."send-spark-reminders"]
+  schedule = "0 * * * *"

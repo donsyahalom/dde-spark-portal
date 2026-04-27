@@ -17,13 +17,29 @@ import {
 // doesn't clear the recipient/schedule tweaks.  Replace with Supabase
 // `ops_settings` row when the RLS table lands.
 const LS_KEY = 'dde.ops.arEmailSettings'
+const EMAIL_DEFAULTS = {
+  enabled: true,
+  dayOfWeek: 1,
+  sendHour: 8,
+  subject: 'Weekly A/R Aging — D. DuBaldo Electric',
+  recipients: [],
+  content: { contractAging: true, contractDetail: true, serviceAging: true, serviceDetail: true },
+  deliveryMode: 'embedded', // 'embedded' | 'password' | 'link'
+  emailPassword: '',
+}
 function loadSettings(defaults) {
   try {
     const raw = localStorage.getItem(LS_KEY)
-    if (!raw) return defaults
+    if (!raw) return { ...EMAIL_DEFAULTS, ...defaults }
     const parsed = JSON.parse(raw)
-    return { ...defaults, ...parsed, recipients: parsed.recipients?.length ? parsed.recipients : defaults.recipients }
-  } catch { return defaults }
+    return {
+      ...EMAIL_DEFAULTS,
+      ...defaults,
+      ...parsed,
+      content: { ...EMAIL_DEFAULTS.content, ...(parsed.content || {}) },
+      recipients: parsed.recipients?.length ? parsed.recipients : (defaults.recipients || []),
+    }
+  } catch { return { ...EMAIL_DEFAULTS, ...defaults } }
 }
 function saveSettings(s) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(s)) } catch {}
@@ -249,10 +265,29 @@ export default function OpsArPage() {
   }
 
   // Assemble the email HTML — re-runs on preview open so edits are reflected.
-  const emailHtml = useMemo(
-    () => buildArEmailHtml({ invoices: arInvoices, subject: settings.subject }),
-    [arInvoices, settings.subject],
-  )
+  const emailHtml = useMemo(() => {
+    if (settings.deliveryMode === 'link') {
+      const appUrl = window.location.origin
+      return `<!DOCTYPE html><html><body style="margin:0;padding:20px;background:#f5f5f5;font-family:Arial,sans-serif;">
+<table cellspacing="0" cellpadding="0" style="max-width:600px;margin:0 auto;background:#fff;border:1px solid #ddd;border-radius:6px;">
+<tr><td style="padding:18px 22px;border-bottom:2px solid #F0C040;">
+  <div style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#666;">DuBaldo Electric — Finance</div>
+  <div style="font-size:18px;font-weight:700;color:#222;margin-top:2px;">${settings.subject}</div>
+</td></tr>
+<tr><td style="padding:24px 22px;">
+  <p style="margin:0 0 20px;font-size:14px;color:#333;">Your weekly A/R aging report is ready.</p>
+  <a href="${appUrl}/ops/ar" style="display:inline-block;background:#F0C040;color:#112e1c;font-weight:700;padding:12px 28px;border-radius:6px;text-decoration:none;font-size:14px;">View A/R Dashboard →</a>
+  <p style="margin:20px 0 0;font-size:11px;color:#888;">If the button doesn't work: ${appUrl}/ops/ar</p>
+</td></tr>
+</table></body></html>`
+    }
+    return buildArEmailHtml({
+      invoices: arInvoices,
+      jobs,
+      subject: settings.subject,
+      content: settings.content || {},
+    })
+  }, [arInvoices, jobs, settings.subject, settings.content, settings.deliveryMode])
 
   return (
     <div>
@@ -323,18 +358,26 @@ export default function OpsArPage() {
         <OpsSectionCard
           title="Weekly A/R email"
           subtitle={emailOpen
-            ? `Sent automatically every ${DOW_LABELS[settings.dayOfWeek]} at ${pad2(settings.sendHour)}:00. Edit recipients below. Click Preview to see exactly what lands in their inbox.`
-            : `Sends every ${DOW_LABELS[settings.dayOfWeek]} at ${pad2(settings.sendHour)}:00 to ${settings.recipients.filter((r) => r.email).length} recipient${settings.recipients.filter((r) => r.email).length === 1 ? '' : 's'}. Expand to edit.`}
+            ? `Configure what gets sent, to whom, and how.`
+            : settings.enabled
+              ? `Sends every ${DOW_LABELS[settings.dayOfWeek]} at ${pad2(settings.sendHour)}:00 to ${settings.recipients.filter((r) => r.email).length} recipient${settings.recipients.filter((r) => r.email).length === 1 ? '' : 's'}. Expand to edit.`
+              : `Email disabled. Expand to re-enable.`}
           right={
-            <div style={{ display: 'flex', gap: 8 }}>
-              {emailOpen && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {/* Enabled toggle */}
+              <label style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer', fontSize:'0.82rem', color: settings.enabled ? 'var(--pos)' : 'var(--text-dim)' }}>
+                <input
+                  type="checkbox"
+                  checked={!!settings.enabled}
+                  onChange={e => persist({ ...settings, enabled: e.target.checked })}
+                  style={{ accentColor:'var(--gold)', width:14, height:14 }}
+                />
+                {settings.enabled ? 'Enabled' : 'Disabled'}
+              </label>
+              {emailOpen && settings.enabled && (
                 <button className="ops-btn" onClick={() => setShowPreview(true)}>Preview email</button>
               )}
-              <button
-                className="ops-btn ghost"
-                onClick={() => setEmailOpen((v) => !v)}
-                aria-expanded={emailOpen}
-              >
+              <button className="ops-btn ghost" onClick={() => setEmailOpen((v) => !v)} aria-expanded={emailOpen}>
                 {emailOpen ? 'Hide' : 'Expand'}
               </button>
             </div>
@@ -342,26 +385,21 @@ export default function OpsArPage() {
         >
           {emailOpen && (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+              {/* ── Schedule ── */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 20 }}>
                 <div className="ops-stat-box">
                   <div className="ops-small ops-text-dim" style={{ marginBottom: 4 }}>Day of week</div>
-                  <select
-                    className="ops-select"
-                    value={settings.dayOfWeek}
+                  <select className="ops-select" value={settings.dayOfWeek}
                     onChange={(e) => persist({ ...settings, dayOfWeek: Number(e.target.value) })}
-                    style={{ width: '100%' }}
-                  >
+                    style={{ width: '100%' }}>
                     {DOW_LABELS.map((d, i) => <option key={d} value={i}>{d}</option>)}
                   </select>
                 </div>
                 <div className="ops-stat-box">
                   <div className="ops-small ops-text-dim" style={{ marginBottom: 4 }}>Send hour (local)</div>
-                  <select
-                    className="ops-select"
-                    value={settings.sendHour}
+                  <select className="ops-select" value={settings.sendHour}
                     onChange={(e) => persist({ ...settings, sendHour: Number(e.target.value) })}
-                    style={{ width: '100%' }}
-                  >
+                    style={{ width: '100%' }}>
                     {Array.from({ length: 24 }, (_, h) => (
                       <option key={h} value={h}>{pad2(h)}:00</option>
                     ))}
@@ -369,16 +407,83 @@ export default function OpsArPage() {
                 </div>
                 <div className="ops-stat-box" style={{ gridColumn: '1 / -1' }}>
                   <div className="ops-small ops-text-dim" style={{ marginBottom: 4 }}>Subject line</div>
-                  <input
-                    className="ops-input"
-                    style={{ width: '100%' }}
-                    value={settings.subject}
-                    onChange={(e) => persist({ ...settings, subject: e.target.value })}
-                  />
+                  <input className="ops-input" style={{ width: '100%' }} value={settings.subject}
+                    onChange={(e) => persist({ ...settings, subject: e.target.value })} />
                 </div>
               </div>
 
-              <div style={{ marginTop: 14 }}>
+              {/* ── Content options ── */}
+              <div style={{ marginBottom: 20 }}>
+                <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 8 }}>
+                  Content to include
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                  {[
+                    ['contractAging',  'Contract Aging'],
+                    ['contractDetail', 'Contract Detail'],
+                    ['serviceAging',   'Service Aging'],
+                    ['serviceDetail',  'Service Detail'],
+                  ].map(([key, label]) => (
+                    <label key={key} style={{ display:'flex', alignItems:'center', gap:6, cursor:'pointer',
+                      padding:'7px 12px', borderRadius:6,
+                      background: settings.content?.[key] ? 'rgba(240,192,64,0.12)' : 'rgba(255,255,255,0.05)',
+                      border: `1px solid ${settings.content?.[key] ? 'rgba(240,192,64,0.35)' : 'rgba(255,255,255,0.12)'}`,
+                      fontSize: '0.83rem', color: 'var(--white)' }}>
+                      <input type="checkbox" checked={!!settings.content?.[key]}
+                        onChange={e => persist({ ...settings, content: { ...(settings.content || {}), [key]: e.target.checked } })}
+                        style={{ accentColor: 'var(--gold)' }} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Delivery mode ── */}
+              <div style={{ marginBottom: 20 }}>
+                <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 8 }}>
+                  Delivery method
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {[
+                    ['embedded',  'Option 1 — Embedded (full report in email, as per preview)'],
+                    ['password',  'Option 2 — Embedded with password protection'],
+                    ['link',      'Option 3 — Link only (email contains a link to the A/R page, no detail)'],
+                  ].map(([val, label]) => (
+                    <label key={val} style={{ display:'flex', alignItems:'flex-start', gap:8, cursor:'pointer',
+                      padding:'10px 14px', borderRadius:6,
+                      background: settings.deliveryMode === val ? 'rgba(240,192,64,0.1)' : 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${settings.deliveryMode === val ? 'rgba(240,192,64,0.4)' : 'rgba(255,255,255,0.1)'}`,
+                      fontSize:'0.85rem', color:'var(--white)' }}>
+                      <input type="radio" name="deliveryMode" value={val}
+                        checked={settings.deliveryMode === val}
+                        onChange={() => persist({ ...settings, deliveryMode: val })}
+                        style={{ marginTop: 2, accentColor: 'var(--gold)', flexShrink: 0 }} />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+                {settings.deliveryMode === 'password' && (
+                  <div style={{ marginTop: 12, maxWidth: 320 }}>
+                    <div className="ops-small ops-text-dim" style={{ marginBottom: 4 }}>
+                      Password recipients must enter to view report
+                    </div>
+                    <input
+                      className="ops-input"
+                      style={{ width: '100%' }}
+                      type="text"
+                      value={settings.emailPassword || ''}
+                      onChange={e => persist({ ...settings, emailPassword: e.target.value })}
+                      placeholder="Set a password…"
+                    />
+                    <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
+                      Note: the email will include a password prompt before the report content is shown.
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Recipients ── */}
+              <div>
                 <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 6 }}>
                   Recipients
                 </div>
@@ -394,22 +499,12 @@ export default function OpsArPage() {
                     {settings.recipients.map((r, i) => (
                       <tr key={i}>
                         <td>
-                          <input
-                            className="ops-input"
-                            style={{ width: '100%' }}
-                            value={r.name}
-                            onChange={(e) => updateRecipient(i, { name: e.target.value })}
-                            placeholder="Full name"
-                          />
+                          <input className="ops-input" style={{ width: '100%' }} value={r.name}
+                            onChange={(e) => updateRecipient(i, { name: e.target.value })} placeholder="Full name" />
                         </td>
                         <td>
-                          <input
-                            className="ops-input"
-                            style={{ width: '100%' }}
-                            value={r.email}
-                            onChange={(e) => updateRecipient(i, { email: e.target.value })}
-                            placeholder="name@dubaldo.com"
-                          />
+                          <input className="ops-input" style={{ width: '100%' }} value={r.email}
+                            onChange={(e) => updateRecipient(i, { email: e.target.value })} placeholder="name@dubaldo.com" />
                         </td>
                         <td>
                           <button className="ops-btn ghost" onClick={() => removeRecipient(i)}>Remove</button>

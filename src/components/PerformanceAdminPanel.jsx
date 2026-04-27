@@ -90,6 +90,12 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
   const [triggerStart,   setTriggerStart]   = useState('')
   const [triggerEnd,     setTriggerEnd]     = useState('')
   const [triggerMode,    setTriggerMode]    = useState('employee') // 'employee' | 'team'
+  // Due date defaults to 7 days from today
+  const defaultDueDate = () => {
+    const d = new Date(); d.setDate(d.getDate() + 7)
+    return d.toISOString().split('T')[0]
+  }
+  const [triggerDueDate, setTriggerDueDate] = useState(defaultDueDate)
   const [teams, setTeams] = useState([])
   const [teamMembers, setTeamMembers] = useState([])  // { team_id, employee_id, employees{} }
   const [triggerLoading, setTriggerLoading] = useState(false)
@@ -255,18 +261,66 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
         .map(m => m.employee_id)
     }
 
+    const dueDate = triggerDueDate || defaultDueDate()
+    const dueDateFormatted = new Date(dueDate + 'T00:00:00').toLocaleDateString('en-US', { month:'2-digit', day:'2-digit', year:'numeric' })
+
     const rows = empIds.map(eid => ({
       employee_id: eid,
       foreman_id: triggerForemanId,
       start_date: triggerStart,
       end_date: triggerEnd,
+      due_date: dueDate,
       triggered_by: currentUser.id,
       status: 'pending',
     }))
 
     const { error } = await supabase.from('perf_cycles').insert(rows)
     if (error) { showMsg('Error triggering evaluation: ' + error.message, 'error') }
-    else { showMsg(`Evaluation triggered for ${empIds.length} employee${empIds.length !== 1 ? 's' : ''}`) }
+    else {
+      showMsg(`Evaluation triggered for ${empIds.length} employee${empIds.length !== 1 ? 's' : ''}`)
+      // Send confirmation email to reviewer (foreman)
+      try {
+        const foreman = employees.find(e => e.id === triggerForemanId)
+        const revieweeNames = empIds.map(eid => {
+          const emp = employees.find(e => e.id === eid)
+          return emp ? `${emp.first_name} ${emp.last_name}` : ''
+        }).filter(Boolean)
+        if (foreman?.email) {
+          const appUrl = window.location.origin
+          for (const name of revieweeNames) {
+            await supabase.functions.invoke('send-notification', {
+              body: {
+                to: foreman.email,
+                subject: `Performance Review Request — ${name}`,
+                channel: 'email',
+                html: `<!DOCTYPE html><html><body style="background:#112e1c;color:#fff;font-family:Georgia,serif;margin:0;padding:20px">
+<div style="max-width:600px;margin:0 auto;background:#0d2118;border:1px solid rgba(240,192,64,0.3);border-radius:12px;overflow:hidden">
+<div style="padding:28px;text-align:center;border-bottom:2px solid #F0C040">
+  <div style="font-size:2rem">📋</div>
+  <h1 style="color:#F0C040;font-size:1.3rem;margin:8px 0 0">Performance Review Request</h1>
+</div>
+<div style="padding:24px">
+  <p style="margin:0 0 16px">Hi ${foreman.first_name},</p>
+  <p style="margin:0 0 16px">You have been asked to complete a performance review for <strong style="color:#F0C040">${name}</strong>.</p>
+  <p style="margin:0 0 24px">This review needs to be completed by <strong style="color:#F0C040">${dueDateFormatted}</strong>.</p>
+  <div style="text-align:center;margin-bottom:24px">
+    <a href="${appUrl}/performance" style="display:inline-block;background:#F0C040;color:#112e1c;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none;font-family:Arial,sans-serif">
+      Go to My Reviews →
+    </a>
+  </div>
+  <p style="color:rgba(255,255,255,0.4);font-size:0.8rem;margin:0">If the button doesn't work, visit: ${appUrl}/performance</p>
+</div>
+<div style="padding:14px 20px;text-align:center;color:rgba(255,255,255,0.35);font-size:0.75rem;border-top:1px solid rgba(240,192,64,0.15)">DDE SPARKS Portal · D. DuBaldo Electric</div>
+</div></body></html>`
+              }
+            })
+          }
+        }
+      } catch(emailErr) {
+        console.warn('Confirmation email failed:', emailErr)
+        // Don't fail the whole trigger if email fails
+      }
+    }
     setTriggerLoading(false)
     fetchAll()
   }
@@ -751,6 +805,18 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                 <label className="form-label">End Date</label>
                 <input type="date" className="form-input" value={triggerEnd} onChange={e=>setTriggerEnd(e.target.value)}/>
               </div>
+              <div style={{ gridColumn:'1 / -1' }}>
+                <label className="form-label">Due Date <span style={{ color:'var(--white-dim)', fontWeight:400, fontSize:'0.75rem' }}>(defaults to 7 days from today — editable)</span></label>
+                <input type="date" className="form-input"
+                  value={triggerDueDate}
+                  min={new Date().toISOString().split('T')[0]}
+                  onChange={e => setTriggerDueDate(e.target.value)}
+                  style={{ maxWidth:'220px' }}
+                />
+                <div style={{ fontSize:'0.72rem', color:'var(--white-dim)', marginTop:'4px' }}>
+                  A reminder email will be sent to the reviewer 2 days before this date (if not yet completed), then every 24 hours until submitted.
+                </div>
+              </div>
             </div>
 
             {triggerStart && triggerEnd && (
@@ -784,6 +850,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                     </span>
                     <div style={{ fontSize:'0.75rem', color:'var(--white-dim)', marginTop:'2px' }}>
                       {c.start_date} → {c.end_date} &nbsp;|&nbsp; Foreman: {c.foreman?.first_name} {c.foreman?.last_name}
+                      {c.due_date && <span style={{ marginLeft:'6px', color: new Date(c.due_date) < new Date() && c.status !== 'submitted' ? 'var(--red)' : 'var(--gold)' }}>Due: {new Date(c.due_date + 'T00:00:00').toLocaleDateString('en-US',{month:'2-digit',day:'2-digit',year:'numeric'})}</span>}
                     </div>
                   </div>
                   <span style={{

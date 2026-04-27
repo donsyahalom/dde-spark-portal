@@ -87,6 +87,31 @@ function DualScrollTable({ children }) {
   )
 }
 
+// ── Tooltip component for checkbox labels ─────────────────────────────────────
+function CBTooltip({ label, tip }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span style={{ position:'relative', display:'inline-flex', alignItems:'center', gap:'4px' }}>
+      {label}
+      <span
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:'14px', height:'14px',
+          borderRadius:'50%', background:'rgba(240,192,64,0.25)', color:'var(--gold)', fontSize:'0.62rem',
+          fontWeight:700, cursor:'help', flexShrink:0, lineHeight:1 }}
+      >?</span>
+      {open && (
+        <span style={{ position:'absolute', bottom:'calc(100% + 6px)', left:0, zIndex:999, width:'260px',
+          background:'#1a3828', border:'1px solid rgba(240,192,64,0.4)', borderRadius:'8px',
+          padding:'9px 12px', fontSize:'0.75rem', color:'var(--white-soft)', lineHeight:1.55,
+          boxShadow:'0 6px 20px rgba(0,0,0,0.5)', pointerEvents:'none' }}>
+          {tip}
+        </span>
+      )}
+    </span>
+  )
+}
+
 // ── TYPE_LABELS ───────────────────────────────────────────────────────────────
 const TYPE_LABELS = {
   assign:       { label:'Peer Sparks',  color:'gold' },
@@ -128,7 +153,7 @@ export default function AdminPage() {
   const [batchRunning, setBatchRunning] = useState(false)
   const [batchErrors, setBatchErrors] = useState([])   // shown in UI after import
 
-  const emptyForm = { first_name:'', last_name:'', email:'', phone:'', carrier:'', initial_sparks:0, daily_accrual:0, job_grade:'', job_title:'', is_management:false, has_spark_list:false, is_optional:false, notify_email:true, notify_sms:false, wage_type:'hourly', wage_amount:'', has_company_vehicle:false, target_bonus_pct:'', bonus_share_pct:'', show_wage:null, show_range:null, show_target_bonus:null, show_bonus_share:null }
+  const emptyForm = { first_name:'', last_name:'', email:'', phone:'', carrier:'', initial_sparks:0, daily_accrual:0, job_grade:'', job_title:'', is_management:false, has_spark_list:false, is_optional:false, notify_email:true, notify_sms:false, wage_type:'hourly', wage_amount:'', has_company_vehicle:false, target_bonus_pct:'', bonus_share_pct:'', show_wage:null, show_range:null, show_target_bonus:null, show_bonus_share:null, has_executive_dashboard:false }
   const [form, setForm] = useState(emptyForm)
   const [batchText, setBatchText] = useState('')
   const [editEmp, setEditEmp] = useState(null)
@@ -565,6 +590,7 @@ export default function AdminPage() {
       show_range: emp.show_range,
       show_target_bonus: emp.show_target_bonus,
       show_bonus_share: emp.show_bonus_share,
+      has_executive_dashboard: emp.has_executive_dashboard || false,
     })
   }
 
@@ -592,6 +618,7 @@ export default function AdminPage() {
       show_range: editValues.show_range,
       show_target_bonus: editValues.show_target_bonus,
       show_bonus_share: editValues.show_bonus_share,
+      has_executive_dashboard: editValues.has_executive_dashboard || false,
       updated_at: new Date().toISOString()
     }).eq('id', editEmp.id)
     const vd = newV - oldV, ud = newU - oldU
@@ -1545,12 +1572,34 @@ export default function AdminPage() {
               <div className="form-group"><label className="form-label">{freqLabel} Accrual</label><input className="form-input" type="number" min="0" value={editValues.daily_accrual||0} onChange={e=>setEditValues(v=>({...v,daily_accrual:e.target.value}))} /></div>
             </div>
             <div style={{display:'flex',gap:'14px',flexWrap:'wrap',marginBottom:'14px'}}>
-              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.is_management||false} onChange={e=>setEditValues(v=>({...v,is_management:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Management</label>
-              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.has_spark_list||false} onChange={e=>setEditValues(v=>({...v,has_spark_list:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Spark List</label>
-              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.is_optional||false} onChange={e=>setEditValues(v=>({...v,is_optional:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Optional</label>
-              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.notify_email!==false} onChange={e=>setEditValues(v=>({...v,notify_email:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📧 Email</label>
-              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.notify_sms||false} onChange={e=>setEditValues(v=>({...v,notify_sms:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📱 SMS</label>
-              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.has_company_vehicle||false} onChange={e=>setEditValues(v=>({...v,has_company_vehicle:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 🚗 Company Vehicle</label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.is_management||false} onChange={e=>setEditValues(v=>({...v,is_management:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="Management" tip="Management employees can view Sparks activity and recognition data for other employees — including team feeds and aggregate dashboard reports. Standard employees can only see their own Sparks history." />
+              </label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.has_spark_list||false} onChange={e=>setEditValues(v=>({...v,has_spark_list:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="Spark List" tip="Employees with Spark List enabled appear on a curated recognition list. This gives them higher visibility when colleagues are choosing who to recognize." />
+              </label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.is_optional||false} onChange={e=>setEditValues(v=>({...v,is_optional:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="Optional" tip="Optional employees are excluded from the mandatory Spark distribution list. They do not count against the required monthly send quota and senders are not prompted to recognize them. Useful for part-time staff, executives, or roles where peer recognition is not expected." />
+              </label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.notify_email!==false} onChange={e=>setEditValues(v=>({...v,notify_email:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="📧 Email" tip="Send this employee email notifications — including Spark summary emails, reminder emails before the period ends, and any other system alerts." />
+              </label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.notify_sms||false} onChange={e=>setEditValues(v=>({...v,notify_sms:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="📱 SMS" tip="Send this employee SMS text message notifications via their carrier gateway. Requires both a 10-digit phone number and a cell carrier to be selected." />
+              </label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.has_company_vehicle||false} onChange={e=>setEditValues(v=>({...v,has_company_vehicle:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="🚗 Company Vehicle" tip="Employee has use of a company vehicle. This adds the configured vehicle hourly rate to their effective total compensation calculation on the Compensation screen." />
+              </label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.has_executive_dashboard||false} onChange={e=>setEditValues(v=>({...v,has_executive_dashboard:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="📊 Executive Dashboard" tip="Grants this employee access to the Executive Dashboard (financial reporting). Their specific tab and field permissions must be configured separately on the Executive Dashboard → Permissions screen." />
+              </label>
             </div>
             {/* Compensation */}
             <div style={{borderTop:'1px solid var(--border)',paddingTop:'14px',marginBottom:'14px'}}>

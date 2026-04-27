@@ -155,9 +155,15 @@ export default function PerformanceRatingPage() {
     return open || null
   }, [selectedEmpId, cycles])
 
-  const selectedEmployee = useMemo(() =>
-    teamMembers.find(e => e.id === selectedEmpId) || null,
-  [teamMembers, selectedEmpId])
+  const selectedEmployee = useMemo(() => {
+    // First try team members list; fall back to the employee data embedded
+    // in the cycle row — this ensures grades like F4 that aren't in the
+    // foreman's own team membership list can still be rated.
+    const fromTeam = teamMembers.find(e => e.id === selectedEmpId)
+    if (fromTeam) return fromTeam
+    const fromCycle = cycles.find(c => c.employee_id === selectedEmpId)?.employee
+    return fromCycle || null
+  }, [teamMembers, selectedEmpId, cycles])
 
   useEffect(() => {
     if (!selectedCycle) { setAnswers({}); setProfile(null); setGradeResp(null); return }
