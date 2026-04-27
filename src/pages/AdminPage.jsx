@@ -201,14 +201,41 @@ export default function AdminPage() {
   useEffect(() => { fetchAll() }, [])
 
   const fetchAll = async () => {
-    const [{ data: emps }, { data: sData }, { data: teamsData }, { data: membersData }, { data: dashData }] = await Promise.all([
+    const now = new Date()
+    const freq = (await supabase.from('settings').select('value').eq('key','spark_frequency').single())?.data?.value || 'daily'
+    let periodStart
+    if (freq === 'daily') {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+    } else if (freq === 'weekly') {
+      const day = now.getDay()
+      const diff = (day === 0 ? -6 : 1 - day)
+      const monday = new Date(now); monday.setDate(now.getDate() + diff); monday.setHours(0,0,0,0)
+      periodStart = monday.toISOString()
+    } else {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+    }
+
+    const [{ data: emps }, { data: sData }, { data: teamsData }, { data: membersData }, { data: dashData }, { data: sentTxns }] = await Promise.all([
       supabase.from('employees').select('*').eq('is_admin', false).order('last_name'),
       supabase.from('settings').select('*'),
       supabase.from('teams').select('*, pm:pm_id(id,first_name,last_name), foreman:foreman_id(id,first_name,last_name)').order('name'),
       supabase.from('team_members').select('*'),
       supabase.from('dashboard_access').select('*, employee:employee_id(id,first_name,last_name)'),
+      supabase.from('spark_transactions').select('from_employee_id,amount').eq('transaction_type','assign').gte('created_at', periodStart).gt('amount', 0),
     ])
-    if (emps) setEmployees(emps)
+
+    // Build sent-this-period map for Left column
+    const sentMap = {}
+    ;(sentTxns || []).forEach(t => { sentMap[t.from_employee_id] = (sentMap[t.from_employee_id] || 0) + t.amount })
+
+    if (emps) {
+      const enriched = emps.map(e => ({
+        ...e,
+        sparks_left_computed: Math.max(0, (e.daily_accrual || 0) - (sentMap[e.id] || 0)),
+        sent_this_period: sentMap[e.id] || 0,
+      }))
+      setEmployees(enriched)
+    }
     if (sData) {
       const o = {}; sData.forEach(s => { o[s.key] = s.value }); setSettings(o)
       const parts = (o.reminder_offsets||'48,24').split(',').map(x=>x.trim())
@@ -679,9 +706,11 @@ export default function AdminPage() {
       .select('*, employee:employee_id(first_name,last_name), admin:admin_id(first_name,last_name)')
       .gte('cashed_out_at', reportFrom + 'T00:00:00').lte('cashed_out_at', reportTo + 'T23:59:59')
       .order('cashed_out_at', { ascending: false })
-    const assignTxns = (txns || []).filter(t => t.transaction_type === 'assign')
+    // Total assigned = sum of positive-amount assign transactions (sparks given TO employees)
+    const assignTxns = (txns || []).filter(t => t.transaction_type === 'assign' && t.amount > 0)
     const totalAssigned = assignTxns.reduce((s, t) => s + t.amount, 0)
-    const totalCashedOut = (cashouts || []).reduce((s, c) => s + c.sparks_redeemed, 0)
+    const totalCashedOut = (cashouts || []).reduce((s, c) => s + (c.sparks_redeemed || 0), 0)
+    // Re-fetch live employee balances so In System reflects current state
     const { data: allEmps } = await supabase.from('employees').select('vested_sparks,unvested_sparks').eq('is_admin', false)
     const totalInSystem = (allEmps || []).reduce((s, e) => s + (e.vested_sparks || 0) + (e.unvested_sparks || 0), 0)
     setReportData({ txns: txns || [], cashouts: cashouts || [], totalAssigned, totalCashedOut, totalInSystem })
@@ -690,11 +719,55 @@ export default function AdminPage() {
 
   const runUnusedReport = async () => {
     setReportLoading(true)
-    const { data: emps } = await supabase.from('employees')
-      .select('id,first_name,last_name,job_title,job_grade,daily_sparks_remaining,daily_accrual,is_management')
-      .eq('is_admin', false).eq('is_management', false)
-    const withUnused = (emps || []).filter(e => (e.daily_sparks_remaining || 0) > 0)
-    setUnusedData({ employees: withUnused, totalUnused: withUnused.reduce((s, e) => s + (e.daily_sparks_remaining || 0), 0), reportDate: new Date().toLocaleDateString() })
+    // Get the start of the current period so we can compute sparks SENT this period
+    const freq = settings.spark_frequency || 'daily'
+    const now = new Date()
+    let periodStart
+    if (freq === 'daily') {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+    } else if (freq === 'weekly') {
+      const day = now.getDay()
+      const diff = (day === 0 ? -6 : 1 - day)
+      const monday = new Date(now); monday.setDate(now.getDate() + diff); monday.setHours(0,0,0,0)
+      periodStart = monday.toISOString()
+    } else {
+      // monthly / biweekly — use first of month as safe fallback
+      periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+    }
+
+    // Fetch employees and their sent-this-period counts in parallel
+    const [{ data: emps }, { data: sentTxns }] = await Promise.all([
+      supabase.from('employees')
+        .select('id,first_name,last_name,job_title,job_grade,daily_sparks_remaining,daily_accrual,is_management,is_optional')
+        .eq('is_admin', false),
+      supabase.from('spark_transactions')
+        .select('from_employee_id,amount')
+        .eq('transaction_type', 'assign')
+        .gte('created_at', periodStart)
+        .gt('amount', 0),
+    ])
+
+    // Build sent map: { empId: totalSentThisPeriod }
+    const sentMap = {}
+    ;(sentTxns || []).forEach(t => {
+      sentMap[t.from_employee_id] = (sentMap[t.from_employee_id] || 0) + t.amount
+    })
+
+    // Recompute sparks_left from accrual minus sent — more reliable than stored remaining
+    const enriched = (emps || []).map(e => {
+      const sentThisPeriod = sentMap[e.id] || 0
+      const sparksLeft = Math.max(0, (e.daily_accrual || 0) - sentThisPeriod)
+      return { ...e, sparks_left_computed: sparksLeft, sent_this_period: sentThisPeriod }
+    })
+
+    // Unused = non-management, non-optional employees who still have sparks to give
+    const withUnused = enriched.filter(e => !e.is_management && !e.is_optional && e.sparks_left_computed > 0)
+    setUnusedData({
+      employees: withUnused,
+      totalUnused: withUnused.reduce((s, e) => s + e.sparks_left_computed, 0),
+      reportDate: new Date().toLocaleDateString(),
+      periodStart: new Date(periodStart).toLocaleDateString(),
+    })
     setReportLoading(false)
   }
 
@@ -703,7 +776,7 @@ export default function AdminPage() {
     let csv = ''
     if (unusedData) {
       csv = 'Employee,Job Title,Job Grade,Unused Sparks,Daily Accrual\n'
-      unusedData.employees.forEach(e => { csv += `"${e.first_name} ${e.last_name}","${e.job_title || ''}","${e.job_grade || ''}",${e.daily_sparks_remaining || 0},${e.daily_accrual || 0}\n` })
+      unusedData.employees.forEach(e => { csv += `"${e.first_name} ${e.last_name}","${e.job_title || ''}","${e.job_grade || ''}",${e.sent_this_period||0},${e.sparks_left_computed||0},${e.daily_accrual || 0}\n` })
       csv += `\nTotal Unused,${unusedData.totalUnused}\n`
     } else {
       csv = 'Date,From,To,Amount,Type,Reason/Note,Status\n'
@@ -869,7 +942,7 @@ export default function AdminPage() {
                       <td style={{color:'var(--white-dim)'}}>{emp.unvested_sparks||0}</td>
                       <td style={{color:'var(--green-bright)',fontWeight:600}}>{emp.redeemed_sparks||0}</td>
                       <td style={{fontWeight:700,color:'var(--gold)'}}>{total}</td>
-                      <td style={{whiteSpace:'nowrap'}}>{emp.daily_sparks_remaining||0}/{emp.daily_accrual||0}</td>
+                      <td style={{whiteSpace:'nowrap'}}>{emp.sparks_left_computed ?? emp.daily_sparks_remaining ?? 0}/{emp.daily_accrual||0}</td>
                       <td>
                         <div style={{display:'flex',gap:'3px'}}>
                           {emp.notify_email&&<span className="chip chip-gold" style={{fontSize:'0.6rem',padding:'1px 5px'}}>📧</span>}
@@ -1473,17 +1546,22 @@ export default function AdminPage() {
             {unusedData&&(
               <div className="card" style={{marginBottom:'16px'}}>
                 <div className="card-title"><span className="icon">🔍</span> Unused Sparks — {unusedData.reportDate}</div>
-                <p style={{fontSize:'0.82rem',color:'var(--white-dim)',marginBottom:'12px'}}>Non-management employees with unused giving allowance.</p>
+                <p style={{fontSize:'0.82rem',color:'var(--white-dim)',marginBottom:'12px'}}>
+                  Non-management, non-optional employees with unused giving allowance this period
+                  {unusedData.periodStart ? ` (since ${unusedData.periodStart})` : ''}.
+                  Computed live from transaction history — not the stored column.
+                </p>
                 <div className="stat-grid" style={{marginBottom:'16px'}}>
                   <div className="stat-card"><div className="stat-value" style={{color:'var(--red)'}}>{unusedData.totalUnused}</div><div className="stat-label">Total Unused</div></div>
                   <div className="stat-card"><div className="stat-value">{unusedData.employees.length}</div><div className="stat-label">w/ Unused</div></div>
                 </div>
                 {unusedData.employees.length>0?(
-                  <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Title</th><th>Grade</th><th>Unused</th><th>Accrual</th></tr></thead>
+                  <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Title</th><th>Grade</th><th>Sent</th><th>Left</th><th>Accrual</th></tr></thead>
                     <tbody>{unusedData.employees.map(e=>(
                       <tr key={e.id}><td style={{fontWeight:600}}>{e.first_name} {e.last_name}</td><td style={{fontSize:'0.82rem'}}>{e.job_title||'—'}</td>
                         <td><span style={{fontSize:'0.72rem',padding:'2px 5px',background:'rgba(240,192,64,0.1)',borderRadius:'4px',color:'var(--gold)'}}>{e.job_grade||'—'}</span></td>
-                        <td><span style={{color:'var(--red)',fontWeight:700}}>🔥 {e.daily_sparks_remaining||0}</span></td>
+                        <td style={{color:'var(--green-bright)',fontWeight:600}}>{e.sent_this_period||0}</td>
+                        <td><span style={{color:'var(--red)',fontWeight:700}}>🔥 {e.sparks_left_computed}</span></td>
                         <td style={{color:'var(--white-dim)'}}>{e.daily_accrual||0}</td>
                       </tr>
                     ))}</tbody>

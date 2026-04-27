@@ -58,6 +58,11 @@ export default function Layout() {
               💵 My Pay
             </NavLink>
           )}
+          {!currentUser?.is_admin && (
+            <NavLink to="/performance" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
+              📋 Evals
+            </NavLink>
+          )}
           {canSeeOps && (
             <NavLink to="/ops" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
               📊 Ops
