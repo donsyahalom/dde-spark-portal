@@ -352,7 +352,7 @@ export default function DashboardTab({ showDollar = true, limitToTeamIds = null 
   const fetchAll = async () => {
     setLoading(true)
     const [{ data: emps }, { data: txns }, { data: teamsData }, { data: membersData }, { data: settingsData }, { data: listsData }] = await Promise.all([
-      supabase.from('employees').select('*').eq('is_admin', false),
+      supabase.from('employees').select('*').eq('is_admin', false).eq('is_archived', false),
       supabase.from('spark_transactions')
         .select('*, from_emp:from_employee_id(id,first_name,last_name,job_title,job_grade,is_optional), to_emp:to_employee_id(id,first_name,last_name,job_title,job_grade,is_optional)')
         .eq('transaction_type', 'assign')

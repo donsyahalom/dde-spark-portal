@@ -28,6 +28,8 @@ export function AuthProvider({ children }) {
 
     if (error || !data) return { error: 'Invalid email or password' }
     if (data.password_hash !== password) return { error: 'Invalid email or password' }
+    // Block archived employees — credentials still exist but access is revoked
+    if (data.is_archived) return { error: 'This account has been deactivated. Please contact your administrator.' }
 
     // Process daily reset (CT timezone) and vesting on login
     await supabase.rpc('reset_daily_sparks')
