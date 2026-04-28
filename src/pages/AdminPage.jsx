@@ -5,6 +5,7 @@ import { MANAGEMENT_GRADES, FREQUENCY_OPTIONS, CARRIERS, LEADERBOARD_RANGE_OPTIO
 import { sendTestNotification, isBeforeGoLive } from '../lib/notificationService'
 import DashboardTab from '../components/DashboardTab'
 import TeamsTab from '../components/TeamsTab'
+import UserPermissionsPage from './UserPermissionsPage'
 import PerformanceAdminPanel from '../components/PerformanceAdminPanel'
 
 // ── Hardcoded fallback lists (used only if DB is empty) ───────────────────────
@@ -909,7 +910,7 @@ export default function AdminPage() {
       )}
 
       <div className="tabs">
-        {[['dashboard','📊 Dashboard'],['employees','👥 Employees'],['add','➕ Add'],['batch','📋 Batch'],['teams','👷 Teams'],['settings','⚙️ Settings'],['lists','📝 Lists'],['reports','📊 Reports'],['performance','📋 Performance']].map(([t,label]) => (
+        {[['dashboard','📊 Dashboard'],['employees','👥 Employees'],['add','➕ Add'],['batch','📋 Batch'],['teams','👷 Teams'],['settings','⚙️ Settings'],['lists','📝 Lists'],['reports','📊 Reports'],['performance','📋 Performance'],['permissions','🔐 Permissions']].map(([t,label]) => (
           <button key={t} className={`tab-btn${tab===t?' active':''}`} onClick={() => setTab(t)}>{label}</button>
         ))}
       </div>
@@ -927,6 +928,11 @@ export default function AdminPage() {
       {/* ── TAGS TAB ── */}
       {tab==='performance'&&(
         <PerformanceAdminPanel employees={employees} showMsg={showMsg} />
+      )}
+
+      {/* ── PERMISSIONS TAB ── */}
+      {tab==='permissions'&&(
+        <UserPermissionsPage />
       )}
 
       {/* ── EMPLOYEES TAB ── */}
@@ -980,10 +986,10 @@ export default function AdminPage() {
                       </td>
                       <td><span style={{fontSize:'0.72rem',padding:'2px 6px',background:'rgba(240,192,64,0.1)',borderRadius:'4px',color:'var(--gold)',whiteSpace:'nowrap'}}>{emp.job_grade||'—'}</span></td>
                       <td style={{fontSize:'0.78rem',whiteSpace:'nowrap'}}>{emp.job_title||'—'}</td>
-                      <td><span className="spark-badge">✨ {emp.vested_sparks||0}</span></td>
-                      <td style={{color:'var(--white-dim)'}}>{emp.unvested_sparks||0}</td>
-                      <td style={{color:'var(--green-bright)',fontWeight:600}}>{emp.redeemed_sparks||0}</td>
-                      <td style={{fontWeight:700,color:'var(--gold)'}}>{total}</td>
+                      <td style={{whiteSpace:'nowrap',minWidth:'70px'}}><span className="spark-badge">✨ {emp.vested_sparks||0}</span></td>
+                      <td style={{color:'var(--white-dim)',whiteSpace:'nowrap',minWidth:'60px'}}>{emp.unvested_sparks||0}</td>
+                      <td style={{color:'var(--green-bright)',fontWeight:600,whiteSpace:'nowrap',minWidth:'60px'}}>{emp.redeemed_sparks||0}</td>
+                      <td style={{fontWeight:700,color:'var(--gold)',whiteSpace:'nowrap',minWidth:'55px'}}>{total}</td>
                       <td style={{whiteSpace:'nowrap'}}>{emp.sparks_left_computed ?? emp.daily_sparks_remaining ?? 0}/{emp.daily_accrual||0}</td>
                       <td>
                         <div style={{display:'flex',gap:'3px'}}>
@@ -1479,9 +1485,23 @@ export default function AdminPage() {
 
           {/* ── Compensation Settings ── */}
           <div className="card" style={{marginBottom:'16px'}}>
-            <div className="card-title"><span className="icon">💵</span> Compensation Settings</div>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'14px',flexWrap:'wrap',gap:'10px'}}>
+              <div className="card-title" style={{marginBottom:0}}><span className="icon">💵</span> Compensation Settings</div>
+              <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',
+                padding:'8px 14px',borderRadius:'8px',
+                background:settings.compensation_enabled==='true'?'rgba(94,232,138,0.1)':'rgba(224,85,85,0.08)',
+                border:`1px solid ${settings.compensation_enabled==='true'?'rgba(94,232,138,0.35)':'rgba(224,85,85,0.35)'}`,
+                fontSize:'0.85rem',fontWeight:600,
+                color:settings.compensation_enabled==='true'?'var(--green-bright)':'#ff8a8a'}}>
+                <input type="checkbox"
+                  checked={settings.compensation_enabled==='true'||settings.compensation_enabled===true}
+                  onChange={e=>setSettings(s=>({...s,compensation_enabled:e.target.checked?'true':'false'}))}
+                  style={{accentColor:'var(--gold)',width:'15px',height:'15px'}} />
+                {settings.compensation_enabled==='true'||settings.compensation_enabled===true ? '✅ My Pay tab visible to employees' : '🚫 My Pay tab hidden from employees'}
+              </label>
+            </div>
             <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'14px'}}>
-              Global compensation and bonus settings. Per-employee visibility can be overridden on each employee record.
+              When enabled, employees see the 💵 My Pay tab. Per-employee visibility overrides apply on each employee record.
             </p>
             <div className="form-grid">
               <div className="form-group">
@@ -1491,13 +1511,17 @@ export default function AdminPage() {
               </div>
             </div>
             <div style={{borderTop:'1px solid var(--border)',paddingTop:'14px',marginTop:'4px',marginBottom:'14px'}}>
-              <div style={{fontSize:'0.72rem',textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--gold)',marginBottom:'10px'}}>Global Visibility Defaults</div>
+              <div style={{fontSize:'0.72rem',textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--gold)',marginBottom:'6px'}}>Global Visibility Defaults</div>
+              <div style={{fontSize:'0.75rem',color:'var(--white-dim)',marginBottom:'10px',lineHeight:1.5}}>
+                These control what all employees see on My Pay. Each can be overridden per-employee on their record.
+                <strong style={{color:'var(--white-soft)'}}> When a toggle is off, that section is completely hidden</strong> — not just empty.
+              </div>
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:'10px',marginBottom:'12px'}}>
                 {[
-                  ['show_wage','Show Wage','Show each employee their wage on the My Pay screen.'],
-                  ['show_range','Show Range','Show the compensation range for the employee\'s job grade.'],
-                  ['show_target_bonus','Show Target Bonus','Show target bonus % and dollar amount.'],
-                  ['show_bonus_share','Show Bonus Share','Show bonus share % and calculated amount.'],
+                  ['show_wage','Show Wage','My Compensation section is visible with the employee\'s wage, vehicle rate, and total comp. When off — the entire My Compensation card is hidden.'],
+                  ['show_range','Show Range','The compensation range bar appears in My Compensation (own grade) AND in the grade comparison section for current and future grades. When off — range bars and min/max tiles are hidden everywhere.'],
+                  ['show_target_bonus','Show Target Bonus','Target bonus % and dollar amount show in My Compensation AND in the grade comparison section. When off — hidden in both places.'],
+                  ['show_bonus_share','Show Bonus Share','Bonus share % and calculated dollar amount show in My Compensation AND in the grade comparison section. When off — hidden in both places including the Bonus Pool card.'],
                 ].map(([key,label,desc])=>(
                   <label key={key} style={{display:'flex',alignItems:'flex-start',gap:'8px',cursor:'pointer',padding:'10px 12px',background:settings[key]==='true'?'rgba(240,192,64,0.08)':'rgba(0,0,0,0.2)',borderRadius:'8px',border:`1px solid ${settings[key]==='true'?'rgba(240,192,64,0.3)':'var(--border)'}`}}>
                     <input type="checkbox" checked={settings[key]==='true'||settings[key]===true} onChange={e=>setSettings(s=>({...s,[key]:e.target.checked?'true':'false'}))} style={{accentColor:'var(--gold)',marginTop:'2px',flexShrink:0}} />
@@ -1714,7 +1738,7 @@ export default function AdminPage() {
               </label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
                 <input type="checkbox" checked={editValues.is_optional||false} onChange={e=>setEditValues(v=>({...v,is_optional:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
-                <CBTooltip label="Optional" tip="Optional employees are excluded from the mandatory Spark distribution list. They do not count against the required monthly send quota and senders are not prompted to recognize them. Useful for part-time staff, executives, or roles where peer recognition is not expected." />
+                <CBTooltip label="Optional" tip="Optional employees are excluded from the mandatory Spark distribution list. They do not count against the required monthly send quota and senders are not prompted to recognize them. Useful for part-time staff, executives, or roles where peer recognition is not expected. Note: optional employees CAN still trigger and view performance evaluations." />
               </label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
                 <input type="checkbox" checked={editValues.notify_email!==false} onChange={e=>setEditValues(v=>({...v,notify_email:e.target.checked}))} style={{accentColor:'var(--gold)'}} />

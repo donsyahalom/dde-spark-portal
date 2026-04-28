@@ -88,7 +88,7 @@ export default function PerformanceRatingPage() {
 
   const isAdmin = currentUser?.is_admin
   const grade = currentUser?.job_grade || ''
-  const isForeman = isAdmin || /^[FP]/.test(grade) || grade === 'Owner'
+  const isForeman = isAdmin || /^[FP]/.test(grade) || grade === 'Owner' || currentUser?.is_optional
 
   // ── Fetch team members for this foreman ───────────────────────────────────
   const fetchTeam = useCallback(async () => {
@@ -245,7 +245,7 @@ export default function PerformanceRatingPage() {
       <div className="card" style={{ textAlign:'center', padding:'60px 24px' }}>
         <div style={{ fontSize:'3rem', marginBottom:'16px' }}>🔒</div>
         <h2 style={{ color:'var(--gold)', fontFamily:'var(--font-display)', marginBottom:'8px' }}>Access Restricted</h2>
-        <p style={{ color:'var(--white-dim)' }}>Performance evaluations are available to foreman and above.</p>
+        <p style={{ color:'var(--white-dim)' }}>Performance evaluations are available to foreman, management, and above.</p>
       </div>
     )
   }

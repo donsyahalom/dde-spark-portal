@@ -30,7 +30,7 @@ Deno.serve(async (req) => {
         }
         if (pushSms && emp.notify_sms && emp.phone && emp.carrier) {
           const smsAddr = emp.phone.replace(/\D/g, '').slice(-10) + emp.carrier
-          const r = await sendViaResend(resendKey, smsAddr, subject || 'DDE SPARKS', message || '')
+          const r = await sendViaResend(resendKey, smsAddr, subject || 'DDE Sparks', message || '')
           results.push({ emp: emp.id, channel: 'sms', ok: r.ok })
           await supa.from('notification_log').insert({ employee_id: emp.id, notification_type: 'broadcast', channel: 'sms', subject, success: r.ok })
         }
@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: false, note: 'No RESEND_API_KEY' }), { headers: { ...cors, 'Content-Type': 'application/json' } })
     }
 
-    const result = await sendViaResend(resendKey, to, subject || 'DDE SPARKS Portal', html || '')
+    const result = await sendViaResend(resendKey, to, subject || 'DDE Spark Portal', html || '')
     return new Response(JSON.stringify({ ok: result.ok, data: result.data }), {
       headers: { ...cors, 'Content-Type': 'application/json' }
     })
@@ -60,7 +60,7 @@ async function sendViaResend(apiKey: string | undefined, to: string, subject: st
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: 'DDE SPARKS Portal <lena@dubaldo.com>', to, subject, html })
+    body: JSON.stringify({ from: 'DDE SPARKS Portal <sparks@dubaldo.com>', to, subject, html })
   })
   const data = await res.json()
   return { ok: res.ok, data }

@@ -1,21 +1,29 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useState, useEffect } from 'react'
+import { supabase } from '../lib/supabase'
 
 // UAT environment banner — only shows when VITE_ENV=UAT is set in Netlify env vars.
-// This variable is never set on the production site, so it never appears there.
 const IS_UAT = import.meta.env.VITE_ENV === 'UAT'
 console.log('IS_UAT:', IS_UAT, 'VITE_ENV:', import.meta.env.VITE_ENV)
 
 export default function Layout() {
   const { currentUser, logout } = useAuth()
   const navigate = useNavigate()
+  const [compensationEnabled, setCompensationEnabled] = useState(true)
+
+  useEffect(() => {
+    supabase.from('settings').select('value').eq('key','compensation_enabled').single()
+      .then(({ data }) => {
+        if (data) setCompensationEnabled(data.value !== 'false')
+      })
+  }, [])
 
   const handleLogout = () => {
     logout()
     navigate('/login')
   }
 
-  // Same rule as OpsRoute in App.jsx — admin or Owner.
   const canSeeOps = currentUser?.is_admin || currentUser?.job_grade === 'Owner'
 
   return (
@@ -53,7 +61,7 @@ export default function Layout() {
               ✨ My Sparks
             </NavLink>
           )}
-          {!currentUser?.is_admin && (
+          {!currentUser?.is_admin && compensationEnabled && (
             <NavLink to="/compensation" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
               💵 My Pay
             </NavLink>

@@ -279,19 +279,19 @@ export default function CompensationPage() {
         </div>
       )}
 
-      {/* ── Own compensation summary (always own grade) ── */}
-      {(showWage || showTargetBonus || showBonusShare) && isViewingOwn && (
+      {/* ── Own compensation summary — only shown when show_wage is on ── */}
+      {showWage && isViewingOwn && (
         <div className="card" style={{ marginBottom: '20px' }}>
           <div className="card-title">💵 My Compensation</div>
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginBottom: showRange ? '16px' : 0 }}>
-            {showWage && empWageAmount > 0 && (
+            {empWageAmount > 0 && (
               <Tile
                 label={empWageType === 'hourly' ? 'My Hourly Rate' : 'My Annual Salary'}
                 value={empWageType === 'hourly' ? `${fmt$(empWageAmount, 2)}/hr` : fmt$(empWageAmount)}
                 color="var(--gold)"
               />
             )}
-            {showWage && empHasVehicle && (
+            {empHasVehicle && (
               <Tile
                 label="Company Vehicle"
                 value={`${fmt$(vehicleRate, 2)}/hr`}
@@ -299,7 +299,7 @@ export default function CompensationPage() {
                 color="var(--white-soft)"
               />
             )}
-            {showWage && empWageAmount > 0 && (
+            {empWageAmount > 0 && (
               <Tile
                 label="Total Comp (Est. Annual)"
                 value={fmt$(empTotalComp)}
@@ -325,7 +325,7 @@ export default function CompensationPage() {
             )}
           </div>
 
-          {/* Range bar — show own grade range */}
+          {/* Range bar — own grade, only when show_range is on */}
           {showRange && gradeWageMin > 0 && gradeWageMax > 0 && empWageAmount > 0 && (
             <div style={{ marginTop: '16px' }}>
               <div style={{ fontSize: '0.78rem', color: 'var(--white-dim)', marginBottom: '10px' }}>
@@ -356,28 +356,28 @@ export default function CompensationPage() {
                 value={gradeWageType === 'hourly' ? 'Hourly' : 'Salary'}
                 color="var(--white-soft)"
               />
-              {gradeWageMin > 0 && (
+              {showRange && gradeWageMin > 0 && (
                 <Tile
                   label={gradeWageType === 'hourly' ? 'Min Rate' : 'Min Salary'}
                   value={gradeWageType === 'hourly' ? `${fmt$(gradeWageMin, 2)}/hr` : fmt$(gradeWageMin)}
                   color="var(--white-dim)"
                 />
               )}
-              {gradeWageMax > 0 && (
+              {showRange && gradeWageMax > 0 && (
                 <Tile
                   label={gradeWageType === 'hourly' ? 'Max Rate' : 'Max Salary'}
                   value={gradeWageType === 'hourly' ? `${fmt$(gradeWageMax, 2)}/hr` : fmt$(gradeWageMax)}
                   color="var(--gold)"
                 />
               )}
-              {gradeTargetBonusPct > 0 && (
+              {showTargetBonus && gradeTargetBonusPct > 0 && (
                 <Tile
                   label="Target Bonus"
                   value={fmtPct(gradeTargetBonusPct)}
                   color="var(--green-bright)"
                 />
               )}
-              {gradeBonusSharePct > 0 && (
+              {showBonusShare && gradeBonusSharePct > 0 && (
                 <Tile
                   label="Bonus Share"
                   value={fmtPct(gradeBonusSharePct)}
@@ -386,7 +386,7 @@ export default function CompensationPage() {
               )}
             </div>
 
-            {gradeWageMin > 0 && gradeWageMax > 0 && (
+            {showRange && gradeWageMin > 0 && gradeWageMax > 0 && (
               <div style={{ marginTop: '16px' }}>
                 <div style={{ fontSize: '0.78rem', color: 'var(--white-dim)', marginBottom: '8px' }}>
                   {viewGrade} range:

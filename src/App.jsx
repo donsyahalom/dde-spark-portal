@@ -22,6 +22,7 @@ import OpsApPage from './pages/ops/OpsApPage'
 import OpsKpisPage from './pages/ops/OpsKpisPage'
 import OpsPayrollPage from './pages/ops/OpsPayrollPage'
 import OpsPermissionsPage from './pages/ops/OpsPermissionsPage'
+import UserPermissionsPage from './pages/UserPermissionsPage'
 import './styles.css'
 
 function ProtectedRoute({ children, adminOnly = false }) {
@@ -35,11 +36,11 @@ function ProtectedRoute({ children, adminOnly = false }) {
   return children
 }
 
-// Guard: foreman or admin only
+// Guard: foreman or admin only (also allows optional employees per settings)
 function ForemanRoute({ children }) {
   const { currentUser } = useAuth()
   const grade = currentUser?.job_grade || ''
-  const isForeman = currentUser?.is_admin || /^[FP]/.test(grade) || grade === 'Owner'
+  const isForeman = currentUser?.is_admin || /^[FP]/.test(grade) || grade === 'Owner' || currentUser?.is_optional
   if (!isForeman) return <Navigate to="/leaderboard" />
   return children
 }
@@ -71,6 +72,7 @@ function AppRoutes() {
         <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
         <Route path="dashboard" element={<ProtectedRoute><UserDashboardPage /></ProtectedRoute>} />
         <Route path="compensation" element={<ProtectedRoute><CompensationPage /></ProtectedRoute>} />
+        <Route path="user-permissions" element={<ProtectedRoute adminOnly><UserPermissionsPage /></ProtectedRoute>} />
         {/* Ops (financial operations) dashboard — admin/Owner only */}
         <Route path="ops" element={<OpsRoute><OpsLayout /></OpsRoute>}>
           <Route index element={<OpsOverviewPage />} />
