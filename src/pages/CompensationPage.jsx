@@ -387,15 +387,12 @@ export default function CompensationPage() {
             </div>
 
             {showRange && gradeWageMin > 0 && gradeWageMax > 0 && (
-              <div style={{ marginTop: '16px' }}>
-                <div style={{ fontSize: '0.78rem', color: 'var(--white-dim)', marginBottom: '8px' }}>
-                  {viewGrade} range:
+              <div style={{ marginTop: '8px' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--white-dim)', fontStyle: 'italic' }}>
+                  {isViewingOwn
+                    ? 'See your position in this range in the My Compensation section above.'
+                    : `Range shown for ${viewGrade}. Your own position bar is in the My Compensation section.`}
                 </div>
-                <RangeBar
-                  value={isViewingOwn ? empWageAmount : 0}
-                  min={gradeWageMin}
-                  max={gradeWageMax}
-                />
               </div>
             )}
           </>
