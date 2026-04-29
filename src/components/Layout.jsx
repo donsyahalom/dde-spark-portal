@@ -10,33 +10,41 @@ console.log('IS_UAT:', IS_UAT, 'VITE_ENV:', import.meta.env.VITE_ENV)
 export default function Layout() {
   const { currentUser, logout } = useAuth()
   const navigate = useNavigate()
-  const [compensationEnabled, setCompensationEnabled] = useState(true)
-  const [userCanSeeCompensation, setUserCanSeeCompensation] = useState(true)
+  const [compensationEnabled, setCompensationEnabled] = useState(false)
+  const [userCanSeeCompensation, setUserCanSeeCompensation] = useState(null) // null = still loading
 
   useEffect(() => {
     // Fetch global compensation_enabled setting
     supabase.from('settings').select('value').eq('key','compensation_enabled').single()
       .then(({ data }) => {
-        if (data) setCompensationEnabled(data.value !== 'false')
+        setCompensationEnabled(data ? data.value !== 'false' : false)
       })
   }, [])
 
   useEffect(() => {
     // Fetch per-employee compensation tab permission from user_permissions
-    if (!currentUser?.id || currentUser?.is_admin) return
+    if (!currentUser?.id) return
+    if (currentUser?.is_admin) { setUserCanSeeCompensation(false); return }
+
     supabase
       .from('user_permissions')
       .select('permissions')
       .eq('employee_id', currentUser.id)
       .single()
       .then(({ data }) => {
-        if (!data) return // No saved permissions = use global default
+        if (!data) {
+          // No saved permissions row — default to hidden (grade default for most employees)
+          setUserCanSeeCompensation(false)
+          return
+        }
         try {
           const perms = JSON.parse(data.permissions)
           const visible = perms?.screens?.compensation?.visible
-          // Only override if explicitly set (true or false); undefined = use global
-          if (typeof visible === 'boolean') setUserCanSeeCompensation(visible)
-        } catch {}
+          // Use the saved value; treat undefined/missing as false
+          setUserCanSeeCompensation(visible === true)
+        } catch {
+          setUserCanSeeCompensation(false)
+        }
       })
   }, [currentUser?.id])
 
@@ -82,7 +90,7 @@ export default function Layout() {
               ✨ My Sparks
             </NavLink>
           )}
-          {!currentUser?.is_admin && compensationEnabled && userCanSeeCompensation && (
+          {!currentUser?.is_admin && compensationEnabled && userCanSeeCompensation === true && (
             <NavLink to="/compensation" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
               💵 My Pay
             </NavLink>
