@@ -573,23 +573,32 @@ export default function AdminPage() {
   const addEmployee = async (e) => {
     e.preventDefault(); setLoading(true)
     const accrual = parseInt(form.daily_accrual) || 0
-    const { error } = await supabase.from('employees').insert({
+    // Build payload with only core required fields first, then add optional fields
+    // conditionally to avoid "column not found in schema cache" errors
+    const payload = {
       first_name: form.first_name.trim(), last_name: form.last_name.trim(),
-      email: form.email.toLowerCase().trim(), phone: form.phone.trim(), carrier: form.carrier,
+      email: form.email.toLowerCase().trim(),
       password_hash: 'spark123', must_change_password: true,
       vested_sparks: 0, unvested_sparks: parseInt(form.initial_sparks) || 0,
       daily_accrual: accrual, daily_sparks_remaining: accrual,
-      job_grade: form.job_grade, job_title: form.job_title,
       is_management: form.is_management || MANAGEMENT_GRADES.includes(form.job_grade),
-      has_spark_list: form.has_spark_list,
+      has_spark_list: form.has_spark_list || false,
       is_optional: form.is_optional || false,
-      notify_email: form.notify_email, notify_sms: form.notify_sms,
-      wage_type: form.wage_type || 'hourly',
-      wage_amount: parseFloat(form.wage_amount) || 0,
-      has_company_vehicle: form.has_company_vehicle || false,
-      target_bonus_pct: parseFloat(form.target_bonus_pct) || 0,
-      bonus_share_pct: parseFloat(form.bonus_share_pct) || 0,
-    })
+      notify_email: form.notify_email !== false,
+      notify_sms: form.notify_sms || false,
+    }
+    // Optional fields — only set when non-empty to avoid schema-cache errors
+    if (form.phone?.trim())           payload.phone               = form.phone.trim()
+    if (form.carrier)                 payload.carrier             = form.carrier
+    if (form.job_grade)               payload.job_grade           = form.job_grade
+    if (form.job_title)               payload.job_title           = form.job_title
+    if (form.wage_type)               payload.wage_type           = form.wage_type
+    if (form.wage_amount !== '')    payload.wage_amount         = parseFloat(form.wage_amount) || 0
+    if (form.has_company_vehicle)     payload.has_company_vehicle = form.has_company_vehicle
+    if (form.target_bonus_pct !== '') payload.target_bonus_pct = parseFloat(form.target_bonus_pct) || 0
+    if (form.bonus_share_pct !== '')  payload.bonus_share_pct  = parseFloat(form.bonus_share_pct) || 0
+    if (form.has_executive_dashboard) payload.has_executive_dashboard = form.has_executive_dashboard
+    const { error } = await supabase.from('employees').insert(payload)
     setLoading(false)
     if (error) { showMsg('error', error.message); return }
     showMsg('success', `${form.first_name} ${form.last_name} added!`)
@@ -654,6 +663,9 @@ export default function AdminPage() {
       email: editValues.email.toLowerCase(), phone: editValues.phone, carrier: editValues.carrier || '',
       vested_sparks: newV, unvested_sparks: newU,
       daily_accrual: parseInt(editValues.daily_accrual) || 0,
+      // When accrual changes, also reset remaining to the new accrual value
+      // so the employee's My Sparks page reflects the change immediately.
+      daily_sparks_remaining: parseInt(editValues.daily_accrual) || 0,
       job_grade: editValues.job_grade, job_title: editValues.job_title,
       is_management: editValues.is_management || MANAGEMENT_GRADES.includes(editValues.job_grade),
       has_spark_list: editValues.has_spark_list,
@@ -718,18 +730,38 @@ export default function AdminPage() {
     showMsg('success', `Test ${testChannel} sent to ${emp.first_name} ${emp.last_name}`)
   }
 
+  // Helper: fetch all rows across paginated Supabase responses (avoids default 1000-row cap)
+  const fetchAllRows = async (buildQuery) => {
+    const PAGE = 1000
+    let page = 0, allRows = []
+    while (true) {
+      const { data, error } = await buildQuery(page * PAGE, PAGE)
+      if (error || !data || data.length === 0) break
+      allRows = allRows.concat(data)
+      if (data.length < PAGE) break
+      page++
+    }
+    return allRows
+  }
+
   const runReport = async () => {
     setReportLoading(true)
-    let q = supabase.from('spark_transactions')
-      .select('*, from_emp:from_employee_id(first_name,last_name), to_emp:to_employee_id(first_name,last_name)')
-      .gte('created_at', reportFrom + 'T00:00:00').lte('created_at', reportTo + 'T23:59:59')
-      .order('created_at', { ascending: false })
-    if (reportTypeFilter !== 'all') q = q.eq('transaction_type', reportTypeFilter)
-    const { data: txns } = await q
-    const { data: cashouts } = await supabase.from('spark_cashouts')
-      .select('*, employee:employee_id(first_name,last_name), admin:admin_id(first_name,last_name)')
-      .gte('cashed_out_at', reportFrom + 'T00:00:00').lte('cashed_out_at', reportTo + 'T23:59:59')
-      .order('cashed_out_at', { ascending: false })
+    const txns = await fetchAllRows((from, limit) => {
+      let q = supabase.from('spark_transactions')
+        .select('*, from_emp:from_employee_id(first_name,last_name), to_emp:to_employee_id(first_name,last_name)')
+        .gte('created_at', reportFrom + 'T00:00:00').lte('created_at', reportTo + 'T23:59:59')
+        .order('created_at', { ascending: false })
+        .range(from, from + limit - 1)
+      if (reportTypeFilter !== 'all') q = q.eq('transaction_type', reportTypeFilter)
+      return q
+    })
+    const cashouts = await fetchAllRows((from, limit) =>
+      supabase.from('spark_cashouts')
+        .select('*, employee:employee_id(first_name,last_name), admin:admin_id(first_name,last_name)')
+        .gte('cashed_out_at', reportFrom + 'T00:00:00').lte('cashed_out_at', reportTo + 'T23:59:59')
+        .order('cashed_out_at', { ascending: false })
+        .range(from, from + limit - 1)
+    )
     // Total assigned = sum of positive-amount assign transactions (sparks given TO employees)
     const assignTxns = (txns || []).filter(t => t.transaction_type === 'assign' && t.amount > 0)
     const totalAssigned = assignTxns.reduce((s, t) => s + t.amount, 0)

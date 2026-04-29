@@ -11,20 +11,17 @@ export default function Layout() {
   const { currentUser, logout } = useAuth()
   const navigate = useNavigate()
   const [compensationEnabled, setCompensationEnabled] = useState(false)
-  const [userCanSeeCompensation, setUserCanSeeCompensation] = useState(null) // null = still loading
+  // null = still loading; false = hidden; true = visible
+  const [navPerms, setNavPerms] = useState(null)
 
   useEffect(() => {
-    // Fetch global compensation_enabled setting
     supabase.from('settings').select('value').eq('key','compensation_enabled').single()
-      .then(({ data }) => {
-        setCompensationEnabled(data ? data.value !== 'false' : false)
-      })
+      .then(({ data }) => setCompensationEnabled(data ? data.value !== 'false' : false))
   }, [])
 
   useEffect(() => {
-    // Fetch per-employee compensation tab permission from user_permissions
     if (!currentUser?.id) return
-    if (currentUser?.is_admin) { setUserCanSeeCompensation(false); return }
+    if (currentUser?.is_admin) { setNavPerms('admin'); return }
 
     supabase
       .from('user_permissions')
@@ -32,21 +29,19 @@ export default function Layout() {
       .eq('employee_id', currentUser.id)
       .single()
       .then(({ data }) => {
-        if (!data) {
-          // No saved permissions row — default to hidden (grade default for most employees)
-          setUserCanSeeCompensation(false)
-          return
-        }
-        try {
-          const perms = JSON.parse(data.permissions)
-          const visible = perms?.screens?.compensation?.visible
-          // Use the saved value; treat undefined/missing as false
-          setUserCanSeeCompensation(visible === true)
-        } catch {
-          setUserCanSeeCompensation(false)
-        }
+        if (!data) { setNavPerms({}); return }
+        try { setNavPerms(JSON.parse(data.permissions)) }
+        catch { setNavPerms({}) }
       })
   }, [currentUser?.id])
+
+  // Helper: is a top-level screen tab visible for the current user?
+  // Defaults to false until permissions are loaded (no flash of hidden tabs)
+  const tabVisible = (screenId) => {
+    if (navPerms === 'admin') return true
+    if (!navPerms) return false
+    return navPerms?.screens?.[screenId]?.visible === true
+  }
 
   const handleLogout = () => {
     logout()
@@ -60,14 +55,9 @@ export default function Layout() {
 
       {IS_UAT && (
         <div style={{
-          background: '#f59e0b',
-          color: '#000',
-          textAlign: 'center',
-          padding: '6px 16px',
-          fontWeight: 'bold',
-          fontSize: '12px',
-          letterSpacing: '0.06em',
-          zIndex: 9999,
+          background: '#f59e0b', color: '#000', textAlign: 'center',
+          padding: '6px 16px', fontWeight: 'bold', fontSize: '12px',
+          letterSpacing: '0.06em', zIndex: 9999,
         }}>
           ⚠️ UAT ENVIRONMENT — Changes here do NOT affect production. Data resets every Sunday.
         </div>
@@ -82,37 +72,63 @@ export default function Layout() {
           </span>
         </div>
         <nav className="header-nav">
-          <NavLink to="/leaderboard" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
-            🏆 Board
-          </NavLink>
-          {!currentUser?.is_admin && (
+
+          {/* Leaderboard — always visible (admins too) */}
+          {(currentUser?.is_admin || tabVisible('leaderboard')) && (
+            <NavLink to="/leaderboard" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
+              🏆 Board
+            </NavLink>
+          )}
+
+          {/* My Sparks */}
+          {!currentUser?.is_admin && tabVisible('my_sparks') && (
             <NavLink to="/my-sparks" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
               ✨ My Sparks
             </NavLink>
           )}
-          {!currentUser?.is_admin && compensationEnabled && userCanSeeCompensation === true && (
+
+          {/* My Pay — also gated by global compensation_enabled setting */}
+          {!currentUser?.is_admin && compensationEnabled && tabVisible('compensation') && (
             <NavLink to="/compensation" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
               💵 My Pay
             </NavLink>
           )}
-          {!currentUser?.is_admin && (
+
+          {/* Evals */}
+          {!currentUser?.is_admin && tabVisible('performance') && (
             <NavLink to="/performance" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
               📋 Evals
             </NavLink>
           )}
+
+          {/* Board */}
+          {!currentUser?.is_admin && tabVisible('board') && (
+            <NavLink to="/board" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
+              📌 Board
+            </NavLink>
+          )}
+
+          {/* Dashboard */}
+          {!currentUser?.is_admin && tabVisible('dashboard') && (
+            <NavLink to="/dashboard" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
+              📊 Dashboard
+            </NavLink>
+          )}
+
+          {/* Ops — admin / Owner only */}
           {canSeeOps && (
             <NavLink to="/ops" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
               📊 Ops
             </NavLink>
           )}
+
+          {/* Admin */}
           {currentUser?.is_admin && (
             <NavLink to="/admin" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
               ⚙️ Admin
             </NavLink>
           )}
-          <NavLink to="/my-sparks" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}
-            style={currentUser?.is_admin ? {display:'none'} : {}}>
-          </NavLink>
+
           <span className="user-badge" style={{marginLeft:'8px'}}>
             {currentUser?.first_name}
             {!currentUser?.is_admin && (
