@@ -1,0 +1,8 @@
+pyodbc>=5.1.0
+# Cap supabase-py below 2.15 — newer versions pull in pyiceberg via
+# storage3/analytics extras, which tries to build from source on Windows
+# and fails with 'failed-wheel-build-for-install'. We only use the
+# PostgREST half of supabase-py, so the older release is fine.
+supabase>=2.6.0,<2.15
+python-dotenv>=1.0.1
+psycopg2-binary>=2.9.9
