@@ -29,18 +29,21 @@ export default function Layout() {
       .eq('employee_id', currentUser.id)
       .single()
       .then(({ data }) => {
-        if (!data) { setNavPerms({}); return }
+        if (!data) { setNavPerms('no-row'); return }
         try { setNavPerms(JSON.parse(data.permissions)) }
-        catch { setNavPerms({}) }
+        catch { setNavPerms('no-row') }
       })
   }, [currentUser?.id])
 
   // Helper: is a top-level screen tab visible for the current user?
   // Defaults to false until permissions are loaded (no flash of hidden tabs)
   const tabVisible = (screenId) => {
-    if (navPerms === 'admin') return true
-    if (!navPerms) return false
-    return navPerms?.screens?.[screenId]?.visible === true
+    if (navPerms === null) return false       // still loading — hide to avoid flash
+    if (navPerms === 'admin') return true     // admin sees everything
+    if (navPerms === 'no-row') return true    // no saved row — show all tabs by default
+    const screen = navPerms?.screens?.[screenId]
+    if (!screen) return true                  // screen not in saved perms — show by default
+    return screen.visible !== false           // explicit false hides; anything else shows
   }
 
   const handleLogout = () => {
