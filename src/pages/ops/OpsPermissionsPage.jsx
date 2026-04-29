@@ -56,11 +56,17 @@ export default function OpsPermissionsPage() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const [{ data: emps }, { data: perms }] = await Promise.all([
+    const [empResult, { data: perms }] = await Promise.all([
       supabase.from('employees').select('id,first_name,last_name,email,job_grade,has_executive_dashboard').eq('is_admin', false).order('last_name'),
       supabase.from('ops_permissions').select('*').catch(() => ({ data: [] })),
     ])
-    const allEmps = emps || []
+    // If has_executive_dashboard column missing from schema cache, fall back to
+    // ops_permissions table to determine who has exec access
+    let allEmps = empResult.data || []
+    if (empResult.error && empResult.error.message?.toLowerCase().includes('schema')) {
+      const { data: fallback } = await supabase.from('employees').select('id,first_name,last_name,email,job_grade').eq('is_admin', false).order('last_name')
+      allEmps = (fallback || []).map(e => ({ ...e, has_executive_dashboard: (perms||[]).some(p => p.employee_id === e.id) }))
+    }
     setEmployees(allEmps)
     const withDash = allEmps.filter(e => e.has_executive_dashboard)
     setExecUsers(withDash)
