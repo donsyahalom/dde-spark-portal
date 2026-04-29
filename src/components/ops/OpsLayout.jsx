@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { OpsViewStateProvider, useOpsViewState } from '../../context/OpsViewStateContext'
 import { OpsCashflowBasisProvider } from '../../context/OpsCashflowBasisContext'
+import { useAuth } from '../../context/AuthContext'
 import '../../ops.css'
 
 const SUBNAV = [
@@ -10,6 +11,7 @@ const SUBNAV = [
   { to: '/ops/cashflow',   label: 'Cashflow' },
   { to: '/ops/ar',         label: 'A/R' },
   { to: '/ops/ap',         label: 'A/P' },
+  { to: '/ops/payroll',    label: 'Payroll' },
   { to: '/ops/kpis',       label: 'KPIs' },
   { to: '/ops/permissions',label: 'Permissions' },
 ]
@@ -28,6 +30,7 @@ const PAGE_TITLE = {
   '/ops/cashflow':    'Cashflow',
   '/ops/ar':          'A/R Detail',
   '/ops/ap':          'A/P Detail',
+  '/ops/payroll':     'Payroll',
   '/ops/kpis':        'KPIs',
   '/ops/permissions': 'Permissions',
 }
@@ -83,6 +86,14 @@ function OpsHeader() {
 // ── profit-center pills + tab row ────────────────────────────────────
 function OpsSubnav() {
   const { pc, setPc } = useOpsViewState()
+  const { currentUser } = useAuth()
+  // Permissions is admin-only. Hide the tab from non-admins completely —
+  // the corresponding route is also gated in App.jsx so direct URL entry
+  // gets redirected to /leaderboard.
+  const visibleTabs = SUBNAV.filter((t) => {
+    if (t.to === '/ops/permissions') return !!currentUser?.is_admin
+    return true
+  })
   return (
     <>
       <div className="ops-pc">
@@ -95,7 +106,7 @@ function OpsSubnav() {
         ))}
       </div>
       <div className="ops-subnav">
-        {SUBNAV.map((t) => (
+        {visibleTabs.map((t) => (
           <NavLink
             key={t.to}
             to={t.to}

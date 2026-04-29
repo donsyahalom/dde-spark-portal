@@ -90,6 +90,12 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
   const [triggerStart,   setTriggerStart]   = useState('')
   const [triggerEnd,     setTriggerEnd]     = useState('')
   const [triggerMode,    setTriggerMode]    = useState('employee') // 'employee' | 'team'
+  // Due date defaults to 7 days from today
+  const defaultDueDate = () => {
+    const d = new Date(); d.setDate(d.getDate() + 7)
+    return d.toISOString().split('T')[0]
+  }
+  const [triggerDueDate, setTriggerDueDate] = useState(defaultDueDate)
   const [teams, setTeams] = useState([])
   const [teamMembers, setTeamMembers] = useState([])  // { team_id, employee_id, employees{} }
   const [triggerLoading, setTriggerLoading] = useState(false)
@@ -111,6 +117,12 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
   const [workdayOverride, setWorkdayOverride] = useState({})  // cycleId -> override value string
   const [systemGrades, setSystemGrades] = useState([])  // all grades from custom_lists in sort order
 
+  // ── Grade compensation ────────────────────────────────────────────────────
+  const [gradeCompensation, setGradeCompensation] = useState([])  // { job_grade, wage_type, wage_min, wage_max, target_bonus_pct, bonus_share_pct }
+  const [editGradeComp, setEditGradeComp] = useState(null)  // { job_grade }
+  const [gradeCompValues, setGradeCompValues] = useState({ wage_type:'hourly', wage_min:'', wage_max:'', target_bonus_pct:'', bonus_share_pct:'' })
+  const [gradeCompSaving, setGradeCompSaving] = useState(false)
+
   // ── Load all data ─────────────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true)
@@ -123,6 +135,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
         { data: profRows },
         { data: gradeRespRows },
         { data: gradeListRows },
+        { data: gradeCompData },
         { data: teamsData },
         { data: membersData },
         { data: sparkTxns },
@@ -137,6 +150,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
         supabase.from('perf_employee_profiles').select('*'),
         supabase.from('perf_grade_responsibilities').select('*').order('job_grade'),
         supabase.from('custom_lists').select('value, sort_order').eq('list_type', 'job_grade').order('sort_order'),
+        supabase.from('perf_grade_compensation').select('*').order('job_grade'),
         supabase.from('teams').select('*').order('name'),
         supabase.from('team_members').select('team_id, employee_id, employees(id,first_name,last_name,job_grade,job_title)'),
         supabase.from('spark_transactions').select('from_employee_id, to_employee_id, amount, reason, transaction_type').eq('transaction_type', 'assign'),
@@ -149,6 +163,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
       setProfiles(profRows || [])
       setGradeResponsibilities(gradeRespRows || [])
       setSystemGrades((gradeListRows || []).map(r => r.value))
+      setGradeCompensation(gradeCompData || [])
       setTeams(teamsData || [])
       setTeamMembers(membersData || [])
 
@@ -246,18 +261,66 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
         .map(m => m.employee_id)
     }
 
+    const dueDate = triggerDueDate || defaultDueDate()
+    const dueDateFormatted = new Date(dueDate + 'T00:00:00').toLocaleDateString('en-US', { month:'2-digit', day:'2-digit', year:'numeric' })
+
     const rows = empIds.map(eid => ({
       employee_id: eid,
       foreman_id: triggerForemanId,
       start_date: triggerStart,
       end_date: triggerEnd,
+      due_date: dueDate,
       triggered_by: currentUser.id,
       status: 'pending',
     }))
 
     const { error } = await supabase.from('perf_cycles').insert(rows)
     if (error) { showMsg('Error triggering evaluation: ' + error.message, 'error') }
-    else { showMsg(`Evaluation triggered for ${empIds.length} employee${empIds.length !== 1 ? 's' : ''}`) }
+    else {
+      showMsg(`Evaluation triggered for ${empIds.length} employee${empIds.length !== 1 ? 's' : ''}`)
+      // Send confirmation email to reviewer (foreman)
+      try {
+        const foreman = employees.find(e => e.id === triggerForemanId)
+        const revieweeNames = empIds.map(eid => {
+          const emp = employees.find(e => e.id === eid)
+          return emp ? `${emp.first_name} ${emp.last_name}` : ''
+        }).filter(Boolean)
+        if (foreman?.email) {
+          const appUrl = window.location.origin
+          for (const name of revieweeNames) {
+            await supabase.functions.invoke('send-notification', {
+              body: {
+                to: foreman.email,
+                subject: `Performance Review Request — ${name}`,
+                channel: 'email',
+                html: `<!DOCTYPE html><html><body style="background:#112e1c;color:#fff;font-family:Georgia,serif;margin:0;padding:20px">
+<div style="max-width:600px;margin:0 auto;background:#0d2118;border:1px solid rgba(240,192,64,0.3);border-radius:12px;overflow:hidden">
+<div style="padding:28px;text-align:center;border-bottom:2px solid #F0C040">
+  <div style="font-size:2rem">📋</div>
+  <h1 style="color:#F0C040;font-size:1.3rem;margin:8px 0 0">Performance Review Request</h1>
+</div>
+<div style="padding:24px">
+  <p style="margin:0 0 16px">Hi ${foreman.first_name},</p>
+  <p style="margin:0 0 16px">You have been asked to complete a performance review for <strong style="color:#F0C040">${name}</strong>.</p>
+  <p style="margin:0 0 24px">This review needs to be completed by <strong style="color:#F0C040">${dueDateFormatted}</strong>.</p>
+  <div style="text-align:center;margin-bottom:24px">
+    <a href="${appUrl}/performance" style="display:inline-block;background:#F0C040;color:#112e1c;font-weight:700;padding:12px 28px;border-radius:8px;text-decoration:none;font-family:Arial,sans-serif">
+      Go to My Reviews →
+    </a>
+  </div>
+  <p style="color:rgba(255,255,255,0.4);font-size:0.8rem;margin:0">If the button doesn't work, visit: ${appUrl}/performance</p>
+</div>
+<div style="padding:14px 20px;text-align:center;color:rgba(255,255,255,0.35);font-size:0.75rem;border-top:1px solid rgba(240,192,64,0.15)">DDE SPARKS Portal · D. DuBaldo Electric</div>
+</div></body></html>`
+              }
+            })
+          }
+        }
+      } catch(emailErr) {
+        console.warn('Confirmation email failed:', emailErr)
+        // Don't fail the whole trigger if email fails
+      }
+    }
     setTriggerLoading(false)
     fetchAll()
   }
@@ -279,6 +342,31 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
     })
     setEditGradeResp(null); setGradeRespText(''); setGradeRespSaving(false)
     showMsg('Grade responsibilities saved')
+  }
+
+  // ── Grade compensation ─────────────────────────────────────────────────────
+  const saveGradeComp = async () => {
+    if (!editGradeComp) return
+    setGradeCompSaving(true)
+    const payload = {
+      job_grade: editGradeComp.job_grade,
+      wage_type: gradeCompValues.wage_type || 'hourly',
+      wage_min: parseFloat(gradeCompValues.wage_min) || 0,
+      wage_max: parseFloat(gradeCompValues.wage_max) || 0,
+      target_bonus_pct: parseFloat(gradeCompValues.target_bonus_pct) || 0,
+      bonus_share_pct: parseFloat(gradeCompValues.bonus_share_pct) || 0,
+      updated_at: new Date().toISOString(),
+      updated_by: currentUser.id,
+    }
+    await supabase.from('perf_grade_compensation').upsert(payload, { onConflict: 'job_grade' })
+    setGradeCompensation(prev => {
+      const idx = prev.findIndex(r => r.job_grade === editGradeComp.job_grade)
+      return idx >= 0 ? prev.map((r, i) => i === idx ? payload : r) : [...prev, payload]
+    })
+    setEditGradeComp(null)
+    setGradeCompValues({ wage_type:'hourly', wage_min:'', wage_max:'', target_bonus_pct:'', bonus_share_pct:'' })
+    setGradeCompSaving(false)
+    showMsg('Grade compensation saved')
   }
 
   // ── Profile (employee-specific responsibilities) ───────────────────────────
@@ -717,6 +805,18 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                 <label className="form-label">End Date</label>
                 <input type="date" className="form-input" value={triggerEnd} onChange={e=>setTriggerEnd(e.target.value)}/>
               </div>
+              <div style={{ gridColumn:'1 / -1' }}>
+                <label className="form-label">Due Date <span style={{ color:'var(--white-dim)', fontWeight:400, fontSize:'0.75rem' }}>(defaults to 7 days from today — editable)</span></label>
+                <input type="date" className="form-input"
+                  value={triggerDueDate}
+                  min={new Date().toISOString().split('T')[0]}
+                  onChange={e => setTriggerDueDate(e.target.value)}
+                  style={{ maxWidth:'220px' }}
+                />
+                <div style={{ fontSize:'0.72rem', color:'var(--white-dim)', marginTop:'4px' }}>
+                  A reminder email will be sent to the reviewer 2 days before this date (if not yet completed), then every 24 hours until submitted.
+                </div>
+              </div>
             </div>
 
             {triggerStart && triggerEnd && (
@@ -750,6 +850,7 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                     </span>
                     <div style={{ fontSize:'0.75rem', color:'var(--white-dim)', marginTop:'2px' }}>
                       {c.start_date} → {c.end_date} &nbsp;|&nbsp; Foreman: {c.foreman?.first_name} {c.foreman?.last_name}
+                      {c.due_date && <span style={{ marginLeft:'6px', color: new Date(c.due_date) < new Date() && c.status !== 'submitted' ? 'var(--red)' : 'var(--gold)' }}>Due: {new Date(c.due_date + 'T00:00:00').toLocaleDateString('en-US',{month:'2-digit',day:'2-digit',year:'numeric'})}</span>}
                     </div>
                   </div>
                   <span style={{
@@ -1037,11 +1138,12 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
           {profilesSubTab === 'grades' && (
             <div>
               <p style={{ color:'var(--white-dim)', fontSize:'0.85rem', marginBottom:'16px', lineHeight:1.6 }}>
-                Set standard responsibilities for each job grade. These are automatically shown to the foreman when rating any employee of that grade.
+                Set standard responsibilities and compensation ranges for each job grade.
               </p>
 
-              {editGradeResp ? (
-                <div className="card" style={{ maxWidth:'640px' }}>
+              {/* ── Edit responsibilities form ── */}
+              {editGradeResp && (
+                <div className="card" style={{ maxWidth:'640px', marginBottom:'16px' }}>
                   <div className="card-title">
                     Edit Responsibilities — Grade <span style={{ color:'var(--gold)' }}>{editGradeResp.job_grade}</span>
                   </div>
@@ -1063,9 +1165,70 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                     <button className="btn btn-outline btn-sm" onClick={() => { setEditGradeResp(null); setGradeRespText('') }}>Cancel</button>
                   </div>
                 </div>
-              ) : (
+              )}
+
+              {/* ── Edit compensation form ── */}
+              {editGradeComp && (
+                <div className="card" style={{ maxWidth:'640px', marginBottom:'16px' }}>
+                  <div className="card-title">
+                    Edit Compensation — Grade <span style={{ color:'var(--gold)' }}>{editGradeComp.job_grade}</span>
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'12px' }}>
+                    <div>
+                      <label className="form-label">Wage Type</label>
+                      <select className="form-select" value={gradeCompValues.wage_type}
+                        onChange={e => setGradeCompValues(v => ({ ...v, wage_type: e.target.value }))}>
+                        <option value="hourly">Hourly</option>
+                        <option value="salary">Salary (Annual)</option>
+                      </select>
+                    </div>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
+                      <div>
+                        <label className="form-label">
+                          {gradeCompValues.wage_type === 'hourly' ? 'Min ($/hr)' : 'Min ($/yr)'}
+                        </label>
+                        <input type="number" min="0" step="0.01" className="form-input"
+                          value={gradeCompValues.wage_min}
+                          onChange={e => setGradeCompValues(v => ({ ...v, wage_min: e.target.value }))}
+                          placeholder="0.00" />
+                      </div>
+                      <div>
+                        <label className="form-label">
+                          {gradeCompValues.wage_type === 'hourly' ? 'Max ($/hr)' : 'Max ($/yr)'}
+                        </label>
+                        <input type="number" min="0" step="0.01" className="form-input"
+                          value={gradeCompValues.wage_max}
+                          onChange={e => setGradeCompValues(v => ({ ...v, wage_max: e.target.value }))}
+                          placeholder="0.00" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="form-label">Target Bonus %</label>
+                      <input type="number" min="0" max="100" step="0.1" className="form-input"
+                        value={gradeCompValues.target_bonus_pct}
+                        onChange={e => setGradeCompValues(v => ({ ...v, target_bonus_pct: e.target.value }))}
+                        placeholder="0" />
+                    </div>
+                    <div>
+                      <label className="form-label">Bonus Share %</label>
+                      <input type="number" min="0" max="100" step="0.1" className="form-input"
+                        value={gradeCompValues.bonus_share_pct}
+                        onChange={e => setGradeCompValues(v => ({ ...v, bonus_share_pct: e.target.value }))}
+                        placeholder="0" />
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', gap:'10px', marginTop:'4px' }}>
+                    <button className="btn btn-gold btn-sm" disabled={gradeCompSaving} onClick={saveGradeComp}>
+                      {gradeCompSaving ? 'Saving…' : 'Save Compensation'}
+                    </button>
+                    <button className="btn btn-outline btn-sm" onClick={() => { setEditGradeComp(null) }}>Cancel</button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Grade cards (list) ── */}
+              {!editGradeResp && !editGradeComp && (
                 <div>
-                  {/* Grade list — driven by the system custom_lists grade list, not employee data */}
                   {(() => {
                     const allGrades = systemGrades.length > 0
                       ? systemGrades
@@ -1079,15 +1242,17 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                       <div style={{ display:'grid', gap:'10px' }}>
                         {allGrades.map(grade => {
                           const gradeResp = gradeResponsibilities.find(r => r.job_grade === grade)
+                          const gradeComp = gradeCompensation.find(r => r.job_grade === grade)
                           const empCount = employees.filter(e => e.job_grade === grade).length
+                          const hasComp = gradeComp && (gradeComp.wage_min > 0 || gradeComp.wage_max > 0)
                           return (
                             <div key={grade} className="card" style={{
-                              display:'flex', alignItems:'flex-start', justifyContent:'space-between',
                               gap:'16px', flexWrap:'wrap',
                               borderColor: gradeResp?.responsibilities ? 'rgba(240,192,64,0.25)' : 'rgba(255,255,255,0.08)'
                             }}>
-                              <div style={{ flex:1, minWidth:0 }}>
-                                <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom: gradeResp?.responsibilities ? '10px' : 0 }}>
+                              {/* Header row */}
+                              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'10px' }}>
+                                <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
                                   <span style={{
                                     fontFamily:'var(--font-display)', fontSize:'0.95rem',
                                     color:'var(--gold)', letterSpacing:'0.06em'
@@ -1095,42 +1260,85 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
                                   <span style={{ fontSize:'0.75rem', color:'var(--white-dim)' }}>
                                     {empCount} employee{empCount !== 1 ? 's' : ''}
                                   </span>
-                                  {gradeResp?.responsibilities ? (
-                                    <span style={{
-                                      fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px',
-                                      background:'rgba(94,232,138,0.1)', color:'var(--green-bright)',
-                                      border:'1px solid rgba(94,232,138,0.3)'
-                                    }}>✓ Set</span>
-                                  ) : (
-                                    <span style={{
-                                      fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px',
-                                      background:'rgba(255,255,255,0.05)', color:'var(--white-dim)',
-                                      border:'1px solid rgba(255,255,255,0.1)'
-                                    }}>Not set</span>
+                                  {gradeResp?.responsibilities
+                                    ? <span style={{ fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px', background:'rgba(94,232,138,0.1)', color:'var(--green-bright)', border:'1px solid rgba(94,232,138,0.3)' }}>✓ Resp</span>
+                                    : <span style={{ fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px', background:'rgba(255,255,255,0.05)', color:'var(--white-dim)', border:'1px solid rgba(255,255,255,0.1)' }}>No Resp</span>
+                                  }
+                                  {hasComp
+                                    ? <span style={{ fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px', background:'rgba(240,192,64,0.1)', color:'var(--gold)', border:'1px solid rgba(240,192,64,0.3)' }}>✓ Comp</span>
+                                    : <span style={{ fontSize:'0.7rem', padding:'2px 8px', borderRadius:'20px', background:'rgba(255,255,255,0.05)', color:'var(--white-dim)', border:'1px solid rgba(255,255,255,0.1)' }}>No Comp</span>
+                                  }
+                                </div>
+                                <div style={{ display:'flex', gap:'6px' }}>
+                                  <button className="btn btn-outline btn-sm" onClick={() => {
+                                    setEditGradeResp({ job_grade: grade })
+                                    setGradeRespText(gradeResp?.responsibilities || '')
+                                  }}>
+                                    {gradeResp?.responsibilities ? '✏️ Resp' : '+ Resp'}
+                                  </button>
+                                  <button className="btn btn-outline btn-sm" onClick={() => {
+                                    setEditGradeComp({ job_grade: grade })
+                                    setGradeCompValues({
+                                      wage_type: gradeComp?.wage_type || 'hourly',
+                                      wage_min: gradeComp?.wage_min ?? '',
+                                      wage_max: gradeComp?.wage_max ?? '',
+                                      target_bonus_pct: gradeComp?.target_bonus_pct ?? '',
+                                      bonus_share_pct: gradeComp?.bonus_share_pct ?? '',
+                                    })
+                                  }}>
+                                    {hasComp ? '✏️ Comp' : '+ Comp'}
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Responsibilities preview */}
+                              {gradeResp?.responsibilities && (
+                                <div style={{
+                                  fontSize:'0.8rem', color:'var(--white-dim)', lineHeight:1.6,
+                                  whiteSpace:'pre-wrap', marginTop:'8px',
+                                  overflow:'hidden', maxHeight:'4.8em',
+                                  maskImage:'linear-gradient(to bottom, black 60%, transparent 100%)',
+                                  WebkitMaskImage:'linear-gradient(to bottom, black 60%, transparent 100%)'
+                                }}>
+                                  {gradeResp.responsibilities}
+                                </div>
+                              )}
+
+                              {/* Compensation summary */}
+                              {hasComp && (
+                                <div style={{
+                                  marginTop:'8px', display:'flex', gap:'16px', flexWrap:'wrap',
+                                  padding:'10px 14px', borderRadius:'8px',
+                                  background:'rgba(240,192,64,0.06)', border:'1px solid rgba(240,192,64,0.15)'
+                                }}>
+                                  <div>
+                                    <span style={{ fontSize:'0.72rem', color:'var(--white-dim)' }}>Type</span>
+                                    <div style={{ fontSize:'0.85rem', color:'var(--gold)', fontWeight:600 }}>
+                                      {gradeComp.wage_type === 'hourly' ? 'Hourly' : 'Salary'}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <span style={{ fontSize:'0.72rem', color:'var(--white-dim)' }}>Range</span>
+                                    <div style={{ fontSize:'0.85rem', color:'var(--white-soft)', fontWeight:600 }}>
+                                      {gradeComp.wage_type === 'hourly'
+                                        ? `$${gradeComp.wage_min}/hr – $${gradeComp.wage_max}/hr`
+                                        : `$${Number(gradeComp.wage_min).toLocaleString()} – $${Number(gradeComp.wage_max).toLocaleString()}/yr`}
+                                    </div>
+                                  </div>
+                                  {gradeComp.target_bonus_pct > 0 && (
+                                    <div>
+                                      <span style={{ fontSize:'0.72rem', color:'var(--white-dim)' }}>Target Bonus</span>
+                                      <div style={{ fontSize:'0.85rem', color:'var(--green-bright)', fontWeight:600 }}>{gradeComp.target_bonus_pct}%</div>
+                                    </div>
+                                  )}
+                                  {gradeComp.bonus_share_pct > 0 && (
+                                    <div>
+                                      <span style={{ fontSize:'0.72rem', color:'var(--white-dim)' }}>Bonus Share</span>
+                                      <div style={{ fontSize:'0.85rem', color:'var(--green-bright)', fontWeight:600 }}>{gradeComp.bonus_share_pct}%</div>
+                                    </div>
                                   )}
                                 </div>
-                                {gradeResp?.responsibilities && (
-                                  <div style={{
-                                    fontSize:'0.8rem', color:'var(--white-dim)', lineHeight:1.6,
-                                    whiteSpace:'pre-wrap',
-                                    overflow:'hidden', maxHeight:'4.8em',
-                                    maskImage:'linear-gradient(to bottom, black 60%, transparent 100%)',
-                                    WebkitMaskImage:'linear-gradient(to bottom, black 60%, transparent 100%)'
-                                  }}>
-                                    {gradeResp.responsibilities}
-                                  </div>
-                                )}
-                              </div>
-                              <button
-                                className="btn btn-outline btn-sm"
-                                style={{ flexShrink:0 }}
-                                onClick={() => {
-                                  setEditGradeResp({ job_grade: grade })
-                                  setGradeRespText(gradeResp?.responsibilities || '')
-                                }}
-                              >
-                                {gradeResp?.responsibilities ? 'Edit' : '+ Add'}
-                              </button>
+                              )}
                             </div>
                           )
                         })}

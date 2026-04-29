@@ -9,7 +9,20 @@ import MessageBoardPage from './pages/MessageBoardPage'
 import UserDashboardPage from './pages/UserDashboardPage'
 import DashboardPage from './pages/DashboardPage'
 import PerformanceRatingPage from './pages/PerformanceRatingPage'
+import CompensationPage from './pages/CompensationPage'
 import Layout from './components/Layout'
+// Ops (financial operations) dashboard — nested under /ops
+import OpsLayout from './components/ops/OpsLayout'
+import OpsOverviewPage from './pages/ops/OpsOverviewPage'
+import OpsPnlPage from './pages/ops/OpsPnlPage'
+import OpsJobsPage from './pages/ops/OpsJobsPage'
+import OpsCashflowPage from './pages/ops/OpsCashflowPage'
+import OpsArPage from './pages/ops/OpsArPage'
+import OpsApPage from './pages/ops/OpsApPage'
+import OpsKpisPage from './pages/ops/OpsKpisPage'
+import OpsPayrollPage from './pages/ops/OpsPayrollPage'
+import OpsPermissionsPage from './pages/ops/OpsPermissionsPage'
+import UserPermissionsPage from './pages/UserPermissionsPage'
 import './styles.css'
 
 function ProtectedRoute({ children, adminOnly = false }) {
@@ -23,12 +36,23 @@ function ProtectedRoute({ children, adminOnly = false }) {
   return children
 }
 
-// Guard: foreman or admin only
+// Guard: foreman or admin only (also allows optional employees per settings)
 function ForemanRoute({ children }) {
   const { currentUser } = useAuth()
   const grade = currentUser?.job_grade || ''
-  const isForeman = currentUser?.is_admin || /^[FP]/.test(grade) || grade === 'Owner'
+  const isForeman = currentUser?.is_admin || /^[FP]/.test(grade) || grade === 'Owner' || currentUser?.is_optional
   if (!isForeman) return <Navigate to="/leaderboard" />
+  return children
+}
+
+// Guard: ops/financial dashboard — admins and owners only.
+// When the server-side `ops_access` RLS table is wired we'll replace
+// this with a per-row lookup; for now keep the gate client-side.
+function OpsRoute({ children }) {
+  const { currentUser } = useAuth()
+  const grade = currentUser?.job_grade || ''
+  const canSeeOps = currentUser?.is_admin || grade === 'Owner'
+  if (!canSeeOps) return <Navigate to="/leaderboard" />
   return children
 }
 
@@ -47,6 +71,21 @@ function AppRoutes() {
         <Route path="performance" element={<ForemanRoute><PerformanceRatingPage /></ForemanRoute>} />
         <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
         <Route path="dashboard" element={<ProtectedRoute><UserDashboardPage /></ProtectedRoute>} />
+        <Route path="compensation" element={<ProtectedRoute><CompensationPage /></ProtectedRoute>} />
+        <Route path="user-permissions" element={<ProtectedRoute adminOnly><UserPermissionsPage /></ProtectedRoute>} />
+        {/* Ops (financial operations) dashboard — admin/Owner only */}
+        <Route path="ops" element={<OpsRoute><OpsLayout /></OpsRoute>}>
+          <Route index element={<OpsOverviewPage />} />
+          <Route path="pnl"         element={<OpsPnlPage />} />
+          <Route path="jobs"        element={<OpsJobsPage />} />
+          <Route path="cashflow"    element={<OpsCashflowPage />} />
+          <Route path="ar"          element={<OpsArPage />} />
+          <Route path="ap"          element={<OpsApPage />} />
+          <Route path="kpis"        element={<OpsKpisPage />} />
+          <Route path="payroll"     element={<OpsPayrollPage />} />
+          {/* Permissions — admin only.  Non-admin users can't even see the tab. */}
+          <Route path="permissions" element={<ProtectedRoute adminOnly><OpsPermissionsPage /></ProtectedRoute>} />
+        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/leaderboard" />} />
     </Routes>

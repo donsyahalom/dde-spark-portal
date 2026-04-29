@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Windows Task Scheduler definition — Sage → Supabase daily sync.
+
+  How to import:
+    1. Open "Task Scheduler" (taskschd.msc).
+    2. Right-click "Task Scheduler Library" → Import Task…
+    3. Select this file.
+    4. On the "General" tab, click "Change User or Group…" and set
+       the account the task runs under. It must:
+         - have permission to read the Sage company data
+         - have "Log on as a batch job" rights (default for admins)
+       Check "Run whether user is logged on or not" and enter the
+       account's password when prompted.
+    5. Verify the "Actions" path points to run_sync.bat.
+    6. Click OK.
+
+  Default schedule: every day at 6:00 AM local time.
+  Adjust in the Triggers tab if you want a different time or cadence.
+-->
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Daily sync from Sage 100 Contractor to Supabase.</Description>
+    <Author>Sage Sync</Author>
+    <URI>\SageSupabaseSync</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-01-05T06:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <!-- Replace with the account that should run this task.
+           Task Scheduler will prompt for the password on import. -->
+      <UserId>DOMAIN\serviceaccount</UserId>
+      <LogonType>Password</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>true</WakeToRun>
+    <ExecutionTimeLimit>PT2H</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT30M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\SageSync\run_sync.bat</Command>
+      <WorkingDirectory>C:\SageSync</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

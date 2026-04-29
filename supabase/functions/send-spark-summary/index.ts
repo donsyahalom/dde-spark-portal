@@ -94,7 +94,8 @@ Deno.serve(async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'DDE Spark Portal UAT <lena@dubaldo.com>',
+        from: 'DDE SPARKS Portal UAT <lena@dubaldo.com>',
+        
         to:   testInbox,                             // ← redirected, never emp.email
         subject: `[UAT] Spark Summary for ${emp.first_name} ${emp.last_name} — ${periodStart} to ${periodEnd}`,
         html,

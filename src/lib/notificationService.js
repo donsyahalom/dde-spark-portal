@@ -71,12 +71,12 @@ export async function sendSummaryEmail(emp, periodStart, periodEnd) {
 
 // Send test notification to one employee
 export async function sendTestNotification(emp, channel) {
-  const html = `<h2>Test from DDE Spark Portal</h2><p>Hi ${emp.first_name}, this is a test ${channel === 'sms' ? 'SMS' : 'email'} from the DDE Spark Portal. If you received this, notifications are working!</p>`
+  const html = `<h2>Test from DDE SPARKS Portal</h2><p>Hi ${emp.first_name}, this is a test ${channel === 'sms' ? 'SMS' : 'email'} from the DDE SPARKS Portal. If you received this, notifications are working!</p>`
   if (channel === 'email' || channel === 'both') {
-    await sendEmail({ to: emp.email, subject: '[TEST] DDE Spark Portal Test', html, employeeId: emp.id, notifType:'test' })
+    await sendEmail({ to: emp.email, subject: '[TEST] DDE SPARKS Portal Test', html, employeeId: emp.id, notifType:'test' })
   }
   if ((channel === 'sms' || channel === 'both') && emp.phone && emp.carrier) {
-    await sendSms({ phone: emp.phone, carrier: emp.carrier, text: `[TEST] DDE Spark Portal test message for ${emp.first_name}`, employeeId: emp.id, notifType:'test' })
+    await sendSms({ phone: emp.phone, carrier: emp.carrier, text: `[TEST] DDE SPARKS Portal test message for ${emp.first_name}`, employeeId: emp.id, notifType:'test' })
   }
 }
 
@@ -107,6 +107,6 @@ ${received.length>0?`<div style="padding:0 20px 20px"><h2 style="font-size:0.8re
 <table style="width:100%;border-collapse:collapse;font-size:0.82rem"><tr style="background:rgba(0,0,0,0.4)"><th style="padding:7px 10px;text-align:left;color:rgba(255,255,255,0.5)">Date</th><th style="padding:7px 10px;text-align:left;color:rgba(255,255,255,0.5)">From</th><th style="padding:7px 10px;text-align:left;color:rgba(255,255,255,0.5)">Amt</th><th style="padding:7px 10px;text-align:left;color:rgba(255,255,255,0.5)">Reason</th></tr>${rcvRows}</table></div>`:''}
 ${given.length>0?`<div style="padding:0 20px 20px"><h2 style="font-size:0.8rem;text-transform:uppercase;color:#F0C040;letter-spacing:0.1em;margin-bottom:10px">📤 Sparks Given (${totalGiven})</h2>
 <table style="width:100%;border-collapse:collapse;font-size:0.82rem"><tr style="background:rgba(0,0,0,0.4)"><th style="padding:7px 10px;text-align:left;color:rgba(255,255,255,0.5)">Date</th><th style="padding:7px 10px;text-align:left;color:rgba(255,255,255,0.5)">To</th><th style="padding:7px 10px;text-align:left;color:rgba(255,255,255,0.5)">Amt</th><th style="padding:7px 10px;text-align:left;color:rgba(255,255,255,0.5)">Reason</th></tr>${givRows}</table></div>`:''}
-<div style="padding:16px 20px;text-align:center;color:rgba(255,255,255,0.35);font-size:0.75rem;border-top:1px solid rgba(240,192,64,0.15)">DDE Spark Portal · D. DuBaldo Electric</div>
+<div style="padding:16px 20px;text-align:center;color:rgba(255,255,255,0.35);font-size:0.75rem;border-top:1px solid rgba(240,192,64,0.15)">DDE SPARKS Portal · D. DuBaldo Electric</div>
 </div></body></html>`
 }

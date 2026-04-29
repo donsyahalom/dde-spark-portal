@@ -5,6 +5,7 @@ import { MANAGEMENT_GRADES, FREQUENCY_OPTIONS, CARRIERS, LEADERBOARD_RANGE_OPTIO
 import { sendTestNotification, isBeforeGoLive } from '../lib/notificationService'
 import DashboardTab from '../components/DashboardTab'
 import TeamsTab from '../components/TeamsTab'
+import UserPermissionsPage from './UserPermissionsPage'
 import PerformanceAdminPanel from '../components/PerformanceAdminPanel'
 
 // ── Hardcoded fallback lists (used only if DB is empty) ───────────────────────
@@ -87,6 +88,31 @@ function DualScrollTable({ children }) {
   )
 }
 
+// ── Tooltip component for checkbox labels ─────────────────────────────────────
+function CBTooltip({ label, tip }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span style={{ position:'relative', display:'inline-flex', alignItems:'center', gap:'4px' }}>
+      {label}
+      <span
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        style={{ display:'inline-flex', alignItems:'center', justifyContent:'center', width:'14px', height:'14px',
+          borderRadius:'50%', background:'rgba(240,192,64,0.25)', color:'var(--gold)', fontSize:'0.62rem',
+          fontWeight:700, cursor:'help', flexShrink:0, lineHeight:1 }}
+      >?</span>
+      {open && (
+        <span style={{ position:'absolute', bottom:'calc(100% + 6px)', left:0, zIndex:999, width:'260px',
+          background:'#1a3828', border:'1px solid rgba(240,192,64,0.4)', borderRadius:'8px',
+          padding:'9px 12px', fontSize:'0.75rem', color:'var(--white-soft)', lineHeight:1.55,
+          boxShadow:'0 6px 20px rgba(0,0,0,0.5)', pointerEvents:'none' }}>
+          {tip}
+        </span>
+      )}
+    </span>
+  )
+}
+
 // ── TYPE_LABELS ───────────────────────────────────────────────────────────────
 const TYPE_LABELS = {
   assign:       { label:'Peer Sparks',  color:'gold' },
@@ -104,6 +130,7 @@ export default function AdminPage() {
   const [employees, setEmployees] = useState([])
   const [settings, setSettings] = useState({})
   const [sortMode, setSortMode] = useState('name')
+  const [empStatusFilter, setEmpStatusFilter] = useState('active') // 'active' | 'archived' | 'all'
   const [message, setMessage] = useState(null)
   const [loading, setLoading] = useState(false)
   const [beforeGoLive, setBeforeGoLive] = useState(true)
@@ -128,7 +155,7 @@ export default function AdminPage() {
   const [batchRunning, setBatchRunning] = useState(false)
   const [batchErrors, setBatchErrors] = useState([])   // shown in UI after import
 
-  const emptyForm = { first_name:'', last_name:'', email:'', phone:'', carrier:'', initial_sparks:0, daily_accrual:0, job_grade:'', job_title:'', is_management:false, has_spark_list:false, is_optional:false, notify_email:true, notify_sms:false }
+  const emptyForm = { first_name:'', last_name:'', email:'', phone:'', carrier:'', initial_sparks:0, daily_accrual:0, job_grade:'', job_title:'', is_management:false, has_spark_list:false, is_optional:false, notify_email:true, notify_sms:false, wage_type:'hourly', wage_amount:'', has_company_vehicle:false, target_bonus_pct:'', bonus_share_pct:'', show_wage:null, show_range:null, show_target_bonus:null, show_bonus_share:null, has_executive_dashboard:false }
   const [form, setForm] = useState(emptyForm)
   const [batchText, setBatchText] = useState('')
   const [editEmp, setEditEmp] = useState(null)
@@ -176,14 +203,41 @@ export default function AdminPage() {
   useEffect(() => { fetchAll() }, [])
 
   const fetchAll = async () => {
-    const [{ data: emps }, { data: sData }, { data: teamsData }, { data: membersData }, { data: dashData }] = await Promise.all([
+    const now = new Date()
+    const freq = (await supabase.from('settings').select('value').eq('key','spark_frequency').single())?.data?.value || 'daily'
+    let periodStart
+    if (freq === 'daily') {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+    } else if (freq === 'weekly') {
+      const day = now.getDay()
+      const diff = (day === 0 ? -6 : 1 - day)
+      const monday = new Date(now); monday.setDate(now.getDate() + diff); monday.setHours(0,0,0,0)
+      periodStart = monday.toISOString()
+    } else {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+    }
+
+    const [{ data: emps }, { data: sData }, { data: teamsData }, { data: membersData }, { data: dashData }, { data: sentTxns }] = await Promise.all([
       supabase.from('employees').select('*').eq('is_admin', false).order('last_name'),
       supabase.from('settings').select('*'),
       supabase.from('teams').select('*, pm:pm_id(id,first_name,last_name), foreman:foreman_id(id,first_name,last_name)').order('name'),
       supabase.from('team_members').select('*'),
       supabase.from('dashboard_access').select('*, employee:employee_id(id,first_name,last_name)'),
+      supabase.from('spark_transactions').select('from_employee_id,amount').eq('transaction_type','assign').gte('created_at', periodStart).gt('amount', 0),
     ])
-    if (emps) setEmployees(emps)
+
+    // Build sent-this-period map for Left column
+    const sentMap = {}
+    ;(sentTxns || []).forEach(t => { sentMap[t.from_employee_id] = (sentMap[t.from_employee_id] || 0) + t.amount })
+
+    if (emps) {
+      const enriched = emps.map(e => ({
+        ...e,
+        sparks_left_computed: Math.max(0, (e.daily_accrual || 0) - (sentMap[e.id] || 0)),
+        sent_this_period: sentMap[e.id] || 0,
+      }))
+      setEmployees(enriched)
+    }
     if (sData) {
       const o = {}; sData.forEach(s => { o[s.key] = s.value }); setSettings(o)
       const parts = (o.reminder_offsets||'48,24').split(',').map(x=>x.trim())
@@ -454,10 +508,32 @@ export default function AdminPage() {
     fetchAll()
   }
 
-  const sortedEmployees = [...employees].sort((a, b) => {
-    if (sortMode === 'ranking') return ((b.vested_sparks||0)+(b.unvested_sparks||0)) - ((a.vested_sparks||0)+(a.unvested_sparks||0))
-    return a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name)
-  })
+  const sortedEmployees = [...employees]
+    .filter(e => {
+      if (empStatusFilter === 'active')   return !e.is_archived
+      if (empStatusFilter === 'archived') return !!e.is_archived
+      return true
+    })
+    .sort((a, b) => {
+      if (sortMode === 'ranking') return ((b.vested_sparks||0)+(b.unvested_sparks||0)) - ((a.vested_sparks||0)+(a.unvested_sparks||0))
+      return a.last_name.localeCompare(b.last_name) || a.first_name.localeCompare(b.first_name)
+    })
+
+  const archiveEmployee = async (emp) => {
+    if (!window.confirm(
+      `Archive ${emp.first_name} ${emp.last_name}?\n\nTheir account, spark history, and employee ID remain fully intact — they just can't log in. You can reactivate them at any time.`
+    )) return
+    await supabase.from('employees').update({ is_archived: true, archived_at: new Date().toISOString() }).eq('id', emp.id)
+    showMsg('success', `${emp.first_name} ${emp.last_name} archived`)
+    fetchAll()
+  }
+
+  const unarchiveEmployee = async (emp) => {
+    if (!window.confirm(`Reactivate ${emp.first_name} ${emp.last_name}? They will be able to log in again.`)) return
+    await supabase.from('employees').update({ is_archived: false, archived_at: null }).eq('id', emp.id)
+    showMsg('success', `${emp.first_name} ${emp.last_name} reactivated`)
+    fetchAll()
+  }
 
   const showMsg = (type, text) => { setMessage({ type, text }); setTimeout(() => setMessage(null), 5000) }
 
@@ -508,6 +584,11 @@ export default function AdminPage() {
       has_spark_list: form.has_spark_list,
       is_optional: form.is_optional || false,
       notify_email: form.notify_email, notify_sms: form.notify_sms,
+      wage_type: form.wage_type || 'hourly',
+      wage_amount: parseFloat(form.wage_amount) || 0,
+      has_company_vehicle: form.has_company_vehicle || false,
+      target_bonus_pct: parseFloat(form.target_bonus_pct) || 0,
+      bonus_share_pct: parseFloat(form.bonus_share_pct) || 0,
     })
     setLoading(false)
     if (error) { showMsg('error', error.message); return }
@@ -550,6 +631,17 @@ export default function AdminPage() {
       daily_accrual: emp.daily_accrual || 0, job_grade: emp.job_grade || '', job_title: emp.job_title || '',
       is_management: emp.is_management || false, has_spark_list: emp.has_spark_list || false, is_optional: emp.is_optional || false,
       notify_email: emp.notify_email !== false, notify_sms: emp.notify_sms || false,
+      // compensation
+      wage_type: emp.wage_type || 'hourly',
+      wage_amount: emp.wage_amount ?? '',
+      has_company_vehicle: emp.has_company_vehicle || false,
+      target_bonus_pct: emp.target_bonus_pct ?? '',
+      bonus_share_pct: emp.bonus_share_pct ?? '',
+      show_wage: emp.show_wage,
+      show_range: emp.show_range,
+      show_target_bonus: emp.show_target_bonus,
+      show_bonus_share: emp.show_bonus_share,
+      has_executive_dashboard: emp.has_executive_dashboard || false,
     })
   }
 
@@ -567,6 +659,17 @@ export default function AdminPage() {
       has_spark_list: editValues.has_spark_list,
       is_optional: editValues.is_optional || false,
       notify_email: editValues.notify_email, notify_sms: editValues.notify_sms,
+      // compensation
+      wage_type: editValues.wage_type || 'hourly',
+      wage_amount: parseFloat(editValues.wage_amount) || 0,
+      has_company_vehicle: editValues.has_company_vehicle || false,
+      target_bonus_pct: parseFloat(editValues.target_bonus_pct) || 0,
+      bonus_share_pct: parseFloat(editValues.bonus_share_pct) || 0,
+      show_wage: editValues.show_wage,
+      show_range: editValues.show_range,
+      show_target_bonus: editValues.show_target_bonus,
+      show_bonus_share: editValues.show_bonus_share,
+      has_executive_dashboard: editValues.has_executive_dashboard || false,
       updated_at: new Date().toISOString()
     }).eq('id', editEmp.id)
     const vd = newV - oldV, ud = newU - oldU
@@ -627,9 +730,11 @@ export default function AdminPage() {
       .select('*, employee:employee_id(first_name,last_name), admin:admin_id(first_name,last_name)')
       .gte('cashed_out_at', reportFrom + 'T00:00:00').lte('cashed_out_at', reportTo + 'T23:59:59')
       .order('cashed_out_at', { ascending: false })
-    const assignTxns = (txns || []).filter(t => t.transaction_type === 'assign')
+    // Total assigned = sum of positive-amount assign transactions (sparks given TO employees)
+    const assignTxns = (txns || []).filter(t => t.transaction_type === 'assign' && t.amount > 0)
     const totalAssigned = assignTxns.reduce((s, t) => s + t.amount, 0)
-    const totalCashedOut = (cashouts || []).reduce((s, c) => s + c.sparks_redeemed, 0)
+    const totalCashedOut = (cashouts || []).reduce((s, c) => s + (c.sparks_redeemed || 0), 0)
+    // Re-fetch live employee balances so In System reflects current state
     const { data: allEmps } = await supabase.from('employees').select('vested_sparks,unvested_sparks').eq('is_admin', false)
     const totalInSystem = (allEmps || []).reduce((s, e) => s + (e.vested_sparks || 0) + (e.unvested_sparks || 0), 0)
     setReportData({ txns: txns || [], cashouts: cashouts || [], totalAssigned, totalCashedOut, totalInSystem })
@@ -638,11 +743,55 @@ export default function AdminPage() {
 
   const runUnusedReport = async () => {
     setReportLoading(true)
-    const { data: emps } = await supabase.from('employees')
-      .select('id,first_name,last_name,job_title,job_grade,daily_sparks_remaining,daily_accrual,is_management')
-      .eq('is_admin', false).eq('is_management', false)
-    const withUnused = (emps || []).filter(e => (e.daily_sparks_remaining || 0) > 0)
-    setUnusedData({ employees: withUnused, totalUnused: withUnused.reduce((s, e) => s + (e.daily_sparks_remaining || 0), 0), reportDate: new Date().toLocaleDateString() })
+    // Get the start of the current period so we can compute sparks SENT this period
+    const freq = settings.spark_frequency || 'daily'
+    const now = new Date()
+    let periodStart
+    if (freq === 'daily') {
+      periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+    } else if (freq === 'weekly') {
+      const day = now.getDay()
+      const diff = (day === 0 ? -6 : 1 - day)
+      const monday = new Date(now); monday.setDate(now.getDate() + diff); monday.setHours(0,0,0,0)
+      periodStart = monday.toISOString()
+    } else {
+      // monthly / biweekly — use first of month as safe fallback
+      periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+    }
+
+    // Fetch employees and their sent-this-period counts in parallel
+    const [{ data: emps }, { data: sentTxns }] = await Promise.all([
+      supabase.from('employees')
+        .select('id,first_name,last_name,job_title,job_grade,daily_sparks_remaining,daily_accrual,is_management,is_optional')
+        .eq('is_admin', false),
+      supabase.from('spark_transactions')
+        .select('from_employee_id,amount')
+        .eq('transaction_type', 'assign')
+        .gte('created_at', periodStart)
+        .gt('amount', 0),
+    ])
+
+    // Build sent map: { empId: totalSentThisPeriod }
+    const sentMap = {}
+    ;(sentTxns || []).forEach(t => {
+      sentMap[t.from_employee_id] = (sentMap[t.from_employee_id] || 0) + t.amount
+    })
+
+    // Recompute sparks_left from accrual minus sent — more reliable than stored remaining
+    const enriched = (emps || []).map(e => {
+      const sentThisPeriod = sentMap[e.id] || 0
+      const sparksLeft = Math.max(0, (e.daily_accrual || 0) - sentThisPeriod)
+      return { ...e, sparks_left_computed: sparksLeft, sent_this_period: sentThisPeriod }
+    })
+
+    // Unused = non-management, non-optional employees who still have sparks to give
+    const withUnused = enriched.filter(e => !e.is_management && !e.is_optional && e.sparks_left_computed > 0)
+    setUnusedData({
+      employees: withUnused,
+      totalUnused: withUnused.reduce((s, e) => s + e.sparks_left_computed, 0),
+      reportDate: new Date().toLocaleDateString(),
+      periodStart: new Date(periodStart).toLocaleDateString(),
+    })
     setReportLoading(false)
   }
 
@@ -651,7 +800,7 @@ export default function AdminPage() {
     let csv = ''
     if (unusedData) {
       csv = 'Employee,Job Title,Job Grade,Unused Sparks,Daily Accrual\n'
-      unusedData.employees.forEach(e => { csv += `"${e.first_name} ${e.last_name}","${e.job_title || ''}","${e.job_grade || ''}",${e.daily_sparks_remaining || 0},${e.daily_accrual || 0}\n` })
+      unusedData.employees.forEach(e => { csv += `"${e.first_name} ${e.last_name}","${e.job_title || ''}","${e.job_grade || ''}",${e.sent_this_period||0},${e.sparks_left_computed||0},${e.daily_accrual || 0}\n` })
       csv += `\nTotal Unused,${unusedData.totalUnused}\n`
     } else {
       csv = 'Date,From,To,Amount,Type,Reason/Note,Status\n'
@@ -761,7 +910,7 @@ export default function AdminPage() {
       )}
 
       <div className="tabs">
-        {[['dashboard','📊 Dashboard'],['employees','👥 Employees'],['add','➕ Add'],['batch','📋 Batch'],['teams','👷 Teams'],['settings','⚙️ Settings'],['lists','📝 Lists'],['reports','📊 Reports'],['performance','📋 Performance']].map(([t,label]) => (
+        {[['dashboard','📊 Dashboard'],['employees','👥 Employees'],['add','➕ Add'],['batch','📋 Batch'],['teams','👷 Teams'],['settings','⚙️ Settings'],['lists','📝 Lists'],['reports','📊 Reports'],['performance','📋 Performance'],['permissions','🔐 Permissions']].map(([t,label]) => (
           <button key={t} className={`tab-btn${tab===t?' active':''}`} onClick={() => setTab(t)}>{label}</button>
         ))}
       </div>
@@ -781,15 +930,35 @@ export default function AdminPage() {
         <PerformanceAdminPanel employees={employees} showMsg={showMsg} />
       )}
 
+      {/* ── PERMISSIONS TAB ── */}
+      {tab==='permissions'&&(
+        <UserPermissionsPage />
+      )}
+
       {/* ── EMPLOYEES TAB ── */}
       {tab==='employees'&&(
         <div className="card">
           <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'16px',flexWrap:'wrap',gap:'12px'}}>
-            <div className="card-title" style={{marginBottom:0}}><span className="icon">👥</span> All Employees ({employees.length})</div>
-            <div className="sort-control" style={{marginBottom:0}}>
-              <span className="sort-label">Sort:</span>
-              <button className={`sort-btn${sortMode==='name'?' active':''}`} onClick={()=>setSortMode('name')}>A–Z</button>
-              <button className={`sort-btn${sortMode==='ranking'?' active':''}`} onClick={()=>setSortMode('ranking')}>🏆 Ranking</button>
+            <div className="card-title" style={{marginBottom:0}}>
+              <span className="icon">👥</span>
+              {empStatusFilter === 'active'   && `Active Employees (${sortedEmployees.length})`}
+              {empStatusFilter === 'archived' && `Archived Employees (${sortedEmployees.length})`}
+              {empStatusFilter === 'all'      && `All Employees (${sortedEmployees.length})`}
+            </div>
+            <div style={{display:'flex',gap:'8px',alignItems:'center',flexWrap:'wrap'}}>
+              {/* Status filter */}
+              <div className="sort-control" style={{marginBottom:0}}>
+                <span className="sort-label">Show:</span>
+                {[['active','✅ Active'],['archived','📦 Archived'],['all','All']].map(([v,l])=>(
+                  <button key={v} className={`sort-btn${empStatusFilter===v?' active':''}`} onClick={()=>setEmpStatusFilter(v)}>{l}</button>
+                ))}
+              </div>
+              {/* Sort */}
+              <div className="sort-control" style={{marginBottom:0}}>
+                <span className="sort-label">Sort:</span>
+                <button className={`sort-btn${sortMode==='name'?' active':''}`} onClick={()=>setSortMode('name')}>A–Z</button>
+                <button className={`sort-btn${sortMode==='ranking'?' active':''}`} onClick={()=>setSortMode('ranking')}>🏆 Ranking</button>
+              </div>
             </div>
           </div>
           <DualScrollTable>
@@ -808,16 +977,20 @@ export default function AdminPage() {
                   const total = (emp.vested_sparks||0)+(emp.unvested_sparks||0)+(emp.redeemed_sparks||0)
                   const carrierLabel = CARRIERS.find(c => c.value === emp.carrier)?.label || '—'
                   const smsAddr = emp.phone && emp.carrier ? emp.phone.replace(/\D/g,'').slice(-10)+emp.carrier : null
+                  const isArchived = !!emp.is_archived
                   return (
-                    <tr key={emp.id}>
-                      <td style={{fontWeight:600,whiteSpace:'nowrap',position:'sticky',left:0,background:'rgba(17,46,28,0.97)',zIndex:1}}>{emp.first_name} {emp.last_name}</td>
+                    <tr key={emp.id} style={isArchived ? {opacity:0.55} : {}}>
+                      <td style={{fontWeight:600,whiteSpace:'nowrap',position:'sticky',left:0,background: isArchived ? 'rgba(17,46,28,0.80)' : 'rgba(17,46,28,0.97)',zIndex:1}}>
+                        {emp.first_name} {emp.last_name}
+                        {isArchived && <span style={{marginLeft:6,fontSize:'0.62rem',padding:'1px 5px',borderRadius:3,background:'rgba(224,85,85,0.2)',color:'#ff8a8a',fontWeight:400}}>Archived</span>}
+                      </td>
                       <td><span style={{fontSize:'0.72rem',padding:'2px 6px',background:'rgba(240,192,64,0.1)',borderRadius:'4px',color:'var(--gold)',whiteSpace:'nowrap'}}>{emp.job_grade||'—'}</span></td>
                       <td style={{fontSize:'0.78rem',whiteSpace:'nowrap'}}>{emp.job_title||'—'}</td>
-                      <td><span className="spark-badge">✨ {emp.vested_sparks||0}</span></td>
-                      <td style={{color:'var(--white-dim)'}}>{emp.unvested_sparks||0}</td>
-                      <td style={{color:'var(--green-bright)',fontWeight:600}}>{emp.redeemed_sparks||0}</td>
-                      <td style={{fontWeight:700,color:'var(--gold)'}}>{total}</td>
-                      <td style={{whiteSpace:'nowrap'}}>{emp.daily_sparks_remaining||0}/{emp.daily_accrual||0}</td>
+                      <td style={{whiteSpace:'nowrap',minWidth:'70px'}}><span className="spark-badge">✨ {emp.vested_sparks||0}</span></td>
+                      <td style={{color:'var(--white-dim)',whiteSpace:'nowrap',minWidth:'60px'}}>{emp.unvested_sparks||0}</td>
+                      <td style={{color:'var(--green-bright)',fontWeight:600,whiteSpace:'nowrap',minWidth:'60px'}}>{emp.redeemed_sparks||0}</td>
+                      <td style={{fontWeight:700,color:'var(--gold)',whiteSpace:'nowrap',minWidth:'55px'}}>{total}</td>
+                      <td style={{whiteSpace:'nowrap'}}>{emp.sparks_left_computed ?? emp.daily_sparks_remaining ?? 0}/{emp.daily_accrual||0}</td>
                       <td>
                         <div style={{display:'flex',gap:'3px'}}>
                           {emp.notify_email&&<span className="chip chip-gold" style={{fontSize:'0.6rem',padding:'1px 5px'}}>📧</span>}
@@ -833,10 +1006,22 @@ export default function AdminPage() {
                       </td>
                       <td>
                         <div style={{display:'flex',gap:'3px',flexWrap:'nowrap'}}>
-                          <button className="btn btn-outline btn-xs" onClick={()=>openEdit(emp)}>Edit</button>
-                          <button className="btn btn-outline btn-xs" style={{color:'var(--gold)',borderColor:'rgba(240,192,64,0.4)'}} onClick={()=>openResetPassword(emp)} title="Reset Password">🔑</button>
-                          <button className="btn btn-xs" style={{background:'rgba(94,232,138,0.2)',color:'var(--green-bright)',border:'1px solid rgba(94,232,138,0.3)'}} onClick={()=>{setCashoutEmp(emp);setCashoutSparks('');setCashoutValue('');setCashoutNote('')}}>💰</button>
-                          <button className="btn btn-danger btn-xs" onClick={()=>removeEmployee(emp)}>✕</button>
+                          {!isArchived ? (
+                            <>
+                              <button className="btn btn-outline btn-xs" onClick={()=>openEdit(emp)}>Edit</button>
+                              <button className="btn btn-outline btn-xs" style={{color:'var(--gold)',borderColor:'rgba(240,192,64,0.4)'}} onClick={()=>openResetPassword(emp)} title="Reset Password">🔑</button>
+                              <button className="btn btn-xs" style={{background:'rgba(94,232,138,0.2)',color:'var(--green-bright)',border:'1px solid rgba(94,232,138,0.3)'}} onClick={()=>{setCashoutEmp(emp);setCashoutSparks('');setCashoutValue('');setCashoutNote('')}}>💰</button>
+                              <button className="btn btn-xs" style={{background:'rgba(240,192,64,0.1)',color:'var(--gold)',border:'1px solid rgba(240,192,64,0.3)',fontSize:'0.65rem',padding:'2px 6px',borderRadius:'4px',cursor:'pointer'}}
+                                onClick={()=>archiveEmployee(emp)} title="Archive employee">📦 Archive</button>
+                            </>
+                          ) : (
+                            <>
+                              <button className="btn btn-outline btn-xs" onClick={()=>openEdit(emp)}>Edit</button>
+                              <button className="btn btn-xs" style={{background:'rgba(94,232,138,0.12)',color:'var(--green-bright)',border:'1px solid rgba(94,232,138,0.35)',fontSize:'0.65rem',padding:'2px 6px',borderRadius:'4px',cursor:'pointer'}}
+                                onClick={()=>unarchiveEmployee(emp)} title="Reactivate employee">♻️ Reactivate</button>
+                              <button className="btn btn-danger btn-xs" onClick={()=>removeEmployee(emp)} title="Permanently delete">✕</button>
+                            </>
+                          )}
                         </div>
                       </td>
                       <td style={{fontSize:'0.72rem',maxWidth:'180px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{emp.email}</td>
@@ -891,6 +1076,32 @@ export default function AdminPage() {
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={form.is_optional} onChange={e=>setForm(f=>({...f,is_optional:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Optional</label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={form.notify_email} onChange={e=>setForm(f=>({...f,notify_email:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📧 Email Notifs</label>
               <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={form.notify_sms} onChange={e=>setForm(f=>({...f,notify_sms:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📱 SMS Notifs</label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={form.has_company_vehicle} onChange={e=>setForm(f=>({...f,has_company_vehicle:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 🚗 Company Vehicle</label>
+            </div>
+            {/* Compensation */}
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:'14px',marginBottom:'14px'}}>
+              <div style={{fontSize:'0.72rem',textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--gold)',marginBottom:'10px'}}>Compensation</div>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label className="form-label">Wage Type</label>
+                  <select className="form-select" value={form.wage_type} onChange={e=>setForm(f=>({...f,wage_type:e.target.value}))}>
+                    <option value="hourly">Hourly</option>
+                    <option value="salary">Salary (Annual)</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{form.wage_type==='hourly'?'Hourly Rate ($/hr)':'Annual Salary ($)'}</label>
+                  <input className="form-input" type="number" min="0" step="0.01" value={form.wage_amount} onChange={e=>setForm(f=>({...f,wage_amount:e.target.value}))} placeholder="0.00" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Target Bonus %</label>
+                  <input className="form-input" type="number" min="0" max="100" step="0.1" value={form.target_bonus_pct} onChange={e=>setForm(f=>({...f,target_bonus_pct:e.target.value}))} placeholder="0" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Bonus Share %</label>
+                  <input className="form-input" type="number" min="0" max="100" step="0.1" value={form.bonus_share_pct} onChange={e=>setForm(f=>({...f,bonus_share_pct:e.target.value}))} placeholder="0" />
+                </div>
+              </div>
             </div>
             <div className="alert alert-warning" style={{marginBottom:'12px'}}>Default password: <strong>spark123</strong></div>
             <button className="btn btn-gold" type="submit" disabled={loading}>{loading?'Adding...':'➕ Add Employee'}</button>
@@ -1272,6 +1483,89 @@ export default function AdminPage() {
             <button className="btn btn-gold btn-sm" onClick={saveSettings} disabled={loading}>{loading?'Saving...':'💾 Save Reminder Settings'}</button>
           </div>
 
+          {/* ── Compensation Settings ── */}
+          <div className="card" style={{marginBottom:'16px'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'14px',flexWrap:'wrap',gap:'10px'}}>
+              <div className="card-title" style={{marginBottom:0}}><span className="icon">💵</span> Compensation Settings</div>
+              <label style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',
+                padding:'8px 14px',borderRadius:'8px',
+                background:settings.compensation_enabled==='true'?'rgba(94,232,138,0.1)':'rgba(224,85,85,0.08)',
+                border:`1px solid ${settings.compensation_enabled==='true'?'rgba(94,232,138,0.35)':'rgba(224,85,85,0.35)'}`,
+                fontSize:'0.85rem',fontWeight:600,
+                color:settings.compensation_enabled==='true'?'var(--green-bright)':'#ff8a8a'}}>
+                <input type="checkbox"
+                  checked={settings.compensation_enabled==='true'||settings.compensation_enabled===true}
+                  onChange={e=>setSettings(s=>({...s,compensation_enabled:e.target.checked?'true':'false'}))}
+                  style={{accentColor:'var(--gold)',width:'15px',height:'15px'}} />
+                {settings.compensation_enabled==='true'||settings.compensation_enabled===true ? '✅ My Pay tab visible to employees' : '🚫 My Pay tab hidden from employees'}
+              </label>
+            </div>
+            <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'14px'}}>
+              When enabled, employees see the 💵 My Pay tab. Per-employee visibility overrides apply on each employee record.
+            </p>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">🚗 Company Vehicle Rate ($/hr)</label>
+                <input className="form-input" type="number" min="0" step="0.01" value={settings.vehicle_hourly_rate||'7.74'} onChange={e=>setSettings(s=>({...s,vehicle_hourly_rate:e.target.value}))} />
+                <div style={{fontSize:'0.7rem',color:'var(--white-dim)',marginTop:'4px'}}>Added to hourly employees' effective compensation when they have a vehicle.</div>
+              </div>
+            </div>
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:'14px',marginTop:'4px',marginBottom:'14px'}}>
+              <div style={{fontSize:'0.72rem',textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--gold)',marginBottom:'6px'}}>Global Visibility Defaults</div>
+              <div style={{fontSize:'0.75rem',color:'var(--white-dim)',marginBottom:'10px',lineHeight:1.5}}>
+                These control what all employees see on My Pay. Each can be overridden per-employee on their record.
+                <strong style={{color:'var(--white-soft)'}}> When a toggle is off, that section is completely hidden</strong> — not just empty.
+              </div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:'10px',marginBottom:'12px'}}>
+                {[
+                  ['show_wage','Show Wage','My Compensation section is visible with the employee\'s wage, vehicle rate, and total comp. When off — the entire My Compensation card is hidden.'],
+                  ['show_range','Show Range','The compensation range bar appears in My Compensation (own grade) AND in the grade comparison section for current and future grades. When off — range bars and min/max tiles are hidden everywhere.'],
+                  ['show_target_bonus','Show Target Bonus','Target bonus % and dollar amount show in My Compensation AND in the grade comparison section. When off — hidden in both places.'],
+                  ['show_bonus_share','Show Bonus Share','Bonus share % and calculated dollar amount show in My Compensation AND in the grade comparison section. When off — hidden in both places including the Bonus Pool card.'],
+                ].map(([key,label,desc])=>(
+                  <label key={key} style={{display:'flex',alignItems:'flex-start',gap:'8px',cursor:'pointer',padding:'10px 12px',background:settings[key]==='true'?'rgba(240,192,64,0.08)':'rgba(0,0,0,0.2)',borderRadius:'8px',border:`1px solid ${settings[key]==='true'?'rgba(240,192,64,0.3)':'var(--border)'}`}}>
+                    <input type="checkbox" checked={settings[key]==='true'||settings[key]===true} onChange={e=>setSettings(s=>({...s,[key]:e.target.checked?'true':'false'}))} style={{accentColor:'var(--gold)',marginTop:'2px',flexShrink:0}} />
+                    <div>
+                      <div style={{fontSize:'0.85rem',fontWeight:600,color:'var(--white-soft)'}}>{label}</div>
+                      <div style={{fontSize:'0.72rem',color:'var(--white-dim)',marginTop:'2px',lineHeight:1.4}}>{desc}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:'14px',marginBottom:'14px'}}>
+              <div style={{fontSize:'0.72rem',textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--gold)',marginBottom:'10px'}}>Bonus Pool Variables</div>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label className="form-label">Total Revenue ($)</label>
+                  <input className="form-input" type="number" min="0" step="1" value={settings.total_revenue||'0'} onChange={e=>setSettings(s=>({...s,total_revenue:e.target.value}))} placeholder="e.g. 6000000" />
+                  <div style={{fontSize:'0.7rem',color:'var(--white-dim)',marginTop:'4px'}}>Annual company revenue. Used to calculate bonus share amounts.</div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Target Minimum ($)</label>
+                  <input className="form-input" type="number" min="0" step="1" value={settings.target_minimum||'0'} onChange={e=>setSettings(s=>({...s,target_minimum:e.target.value}))} placeholder="e.g. 5000000" />
+                  <div style={{fontSize:'0.7rem',color:'var(--white-dim)',marginTop:'4px'}}>Revenue threshold at which bonus sharing kicks in.</div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Target Bonus Share %</label>
+                  <input className="form-input" type="number" min="0" max="100" step="0.1" value={settings.target_bonus_share_pct||'0'} onChange={e=>setSettings(s=>({...s,target_bonus_share_pct:e.target.value}))} placeholder="e.g. 10" />
+                  <div style={{fontSize:'0.7rem',color:'var(--white-dim)',marginTop:'4px'}}>
+                    % of revenue above the target minimum shared as bonuses.
+                    {(() => {
+                      const rev = parseFloat(settings.total_revenue||0)
+                      const min = parseFloat(settings.target_minimum||0)
+                      const pct = parseFloat(settings.target_bonus_share_pct||0)
+                      const pool = Math.max(0, (rev - min) * (pct / 100))
+                      if (pool > 0) return <span style={{color:'var(--gold)',fontWeight:600}}> Pool: ${pool.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+                      return null
+                    })()}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button className="btn btn-gold btn-sm" onClick={saveSettings} disabled={loading}>{loading?'Saving...':'💾 Save Compensation Settings'}</button>
+          </div>
+
           <div className="card">
             <div className="card-title"><span className="icon">🧪</span> Test Notifications</div>
             <p style={{color:'var(--white-dim)',fontSize:'0.83rem',marginBottom:'14px'}}>Send a test email or SMS to any employee. Works even before go-live.</p>
@@ -1330,17 +1624,22 @@ export default function AdminPage() {
             {unusedData&&(
               <div className="card" style={{marginBottom:'16px'}}>
                 <div className="card-title"><span className="icon">🔍</span> Unused Sparks — {unusedData.reportDate}</div>
-                <p style={{fontSize:'0.82rem',color:'var(--white-dim)',marginBottom:'12px'}}>Non-management employees with unused giving allowance.</p>
+                <p style={{fontSize:'0.82rem',color:'var(--white-dim)',marginBottom:'12px'}}>
+                  Non-management, non-optional employees with unused giving allowance this period
+                  {unusedData.periodStart ? ` (since ${unusedData.periodStart})` : ''}.
+                  Computed live from transaction history — not the stored column.
+                </p>
                 <div className="stat-grid" style={{marginBottom:'16px'}}>
                   <div className="stat-card"><div className="stat-value" style={{color:'var(--red)'}}>{unusedData.totalUnused}</div><div className="stat-label">Total Unused</div></div>
                   <div className="stat-card"><div className="stat-value">{unusedData.employees.length}</div><div className="stat-label">w/ Unused</div></div>
                 </div>
                 {unusedData.employees.length>0?(
-                  <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Title</th><th>Grade</th><th>Unused</th><th>Accrual</th></tr></thead>
+                  <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Title</th><th>Grade</th><th>Sent</th><th>Left</th><th>Accrual</th></tr></thead>
                     <tbody>{unusedData.employees.map(e=>(
                       <tr key={e.id}><td style={{fontWeight:600}}>{e.first_name} {e.last_name}</td><td style={{fontSize:'0.82rem'}}>{e.job_title||'—'}</td>
                         <td><span style={{fontSize:'0.72rem',padding:'2px 5px',background:'rgba(240,192,64,0.1)',borderRadius:'4px',color:'var(--gold)'}}>{e.job_grade||'—'}</span></td>
-                        <td><span style={{color:'var(--red)',fontWeight:700}}>🔥 {e.daily_sparks_remaining||0}</span></td>
+                        <td style={{color:'var(--green-bright)',fontWeight:600}}>{e.sent_this_period||0}</td>
+                        <td><span style={{color:'var(--red)',fontWeight:700}}>🔥 {e.sparks_left_computed}</span></td>
                         <td style={{color:'var(--white-dim)'}}>{e.daily_accrual||0}</td>
                       </tr>
                     ))}</tbody>
@@ -1429,11 +1728,82 @@ export default function AdminPage() {
               <div className="form-group"><label className="form-label">{freqLabel} Accrual</label><input className="form-input" type="number" min="0" value={editValues.daily_accrual||0} onChange={e=>setEditValues(v=>({...v,daily_accrual:e.target.value}))} /></div>
             </div>
             <div style={{display:'flex',gap:'14px',flexWrap:'wrap',marginBottom:'14px'}}>
-              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.is_management||false} onChange={e=>setEditValues(v=>({...v,is_management:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Management</label>
-              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.has_spark_list||false} onChange={e=>setEditValues(v=>({...v,has_spark_list:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Spark List</label>
-              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.is_optional||false} onChange={e=>setEditValues(v=>({...v,is_optional:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> Optional</label>
-              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.notify_email!==false} onChange={e=>setEditValues(v=>({...v,notify_email:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📧 Email</label>
-              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}><input type="checkbox" checked={editValues.notify_sms||false} onChange={e=>setEditValues(v=>({...v,notify_sms:e.target.checked}))} style={{accentColor:'var(--gold)'}} /> 📱 SMS</label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.is_management||false} onChange={e=>setEditValues(v=>({...v,is_management:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="Management" tip="Management employees can view Sparks activity and recognition data for other employees — including team feeds and aggregate dashboard reports. Standard employees can only see their own Sparks history." />
+              </label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.has_spark_list||false} onChange={e=>setEditValues(v=>({...v,has_spark_list:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="Spark List" tip="Employees with Spark List enabled appear on a curated recognition list. This gives them higher visibility when colleagues are choosing who to recognize." />
+              </label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.is_optional||false} onChange={e=>setEditValues(v=>({...v,is_optional:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="Optional" tip="Optional employees are excluded from the mandatory Spark distribution list. They do not count against the required monthly send quota and senders are not prompted to recognize them. Useful for part-time staff, executives, or roles where peer recognition is not expected. Note: optional employees CAN still trigger and view performance evaluations." />
+              </label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.notify_email!==false} onChange={e=>setEditValues(v=>({...v,notify_email:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="📧 Email" tip="Send this employee email notifications — including Spark summary emails, reminder emails before the period ends, and any other system alerts." />
+              </label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.notify_sms||false} onChange={e=>setEditValues(v=>({...v,notify_sms:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="📱 SMS" tip="Send this employee SMS text message notifications via their carrier gateway. Requires both a 10-digit phone number and a cell carrier to be selected." />
+              </label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.has_company_vehicle||false} onChange={e=>setEditValues(v=>({...v,has_company_vehicle:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="🚗 Company Vehicle" tip="Employee has use of a company vehicle. This adds the configured vehicle hourly rate to their effective total compensation calculation on the Compensation screen." />
+              </label>
+              <label style={{display:'flex',alignItems:'center',gap:'7px',cursor:'pointer',fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={editValues.has_executive_dashboard||false} onChange={e=>setEditValues(v=>({...v,has_executive_dashboard:e.target.checked}))} style={{accentColor:'var(--gold)'}} />
+                <CBTooltip label="📊 Executive Dashboard" tip="Grants this employee access to the Executive Dashboard (financial reporting). Their specific tab and field permissions must be configured separately on the Executive Dashboard → Permissions screen." />
+              </label>
+            </div>
+            {/* Compensation */}
+            <div style={{borderTop:'1px solid var(--border)',paddingTop:'14px',marginBottom:'14px'}}>
+              <div style={{fontSize:'0.72rem',textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--gold)',marginBottom:'10px'}}>💵 Compensation</div>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label className="form-label">Wage Type</label>
+                  <select className="form-select" value={editValues.wage_type||'hourly'} onChange={e=>setEditValues(v=>({...v,wage_type:e.target.value}))}>
+                    <option value="hourly">Hourly</option>
+                    <option value="salary">Salary (Annual)</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{editValues.wage_type==='salary'?'Annual Salary ($)':'Hourly Rate ($/hr)'}</label>
+                  <input className="form-input" type="number" min="0" step="0.01" value={editValues.wage_amount??''} onChange={e=>setEditValues(v=>({...v,wage_amount:e.target.value}))} placeholder="0.00" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Target Bonus %</label>
+                  <input className="form-input" type="number" min="0" max="100" step="0.1" value={editValues.target_bonus_pct??''} onChange={e=>setEditValues(v=>({...v,target_bonus_pct:e.target.value}))} placeholder="0" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Bonus Share %</label>
+                  <input className="form-input" type="number" min="0" max="100" step="0.1" value={editValues.bonus_share_pct??''} onChange={e=>setEditValues(v=>({...v,bonus_share_pct:e.target.value}))} placeholder="0" />
+                </div>
+              </div>
+              {/* Per-employee visibility overrides */}
+              <div style={{marginTop:'12px'}}>
+                <div style={{fontSize:'0.72rem',color:'var(--white-dim)',marginBottom:'8px'}}>Visibility overrides (null = use global setting)</div>
+                <div style={{display:'flex',gap:'10px',flexWrap:'wrap'}}>
+                  {[
+                    ['show_wage','Show Wage'],
+                    ['show_range','Show Range'],
+                    ['show_target_bonus','Show Target Bonus'],
+                    ['show_bonus_share','Show Bonus Share'],
+                  ].map(([key, label]) => (
+                    <div key={key} style={{display:'flex',flexDirection:'column',gap:'2px',minWidth:'110px'}}>
+                      <span style={{fontSize:'0.72rem',color:'var(--white-dim)'}}>{label}</span>
+                      <select className="form-select" style={{fontSize:'0.78rem',padding:'4px 8px'}}
+                        value={editValues[key]===null||editValues[key]===undefined?'null':editValues[key]?'true':'false'}
+                        onChange={e=>setEditValues(v=>({...v,[key]:e.target.value==='null'?null:e.target.value==='true'}))}>
+                        <option value="null">Inherit (global)</option>
+                        <option value="true">On</option>
+                        <option value="false">Off</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
             <div style={{display:'flex',gap:'10px'}}>
               <button className="btn btn-gold" onClick={saveEdit} disabled={loading}>{loading?'Saving...':'💾 Save'}</button>

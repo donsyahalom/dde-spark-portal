@@ -54,8 +54,8 @@ export default function EmployeePage() {
     setNextReset(resetTime)
     // Fetch employees
     const { data: emps } = await supabase.from('employees')
-      .select('id, first_name, last_name, job_title')
-      .eq('is_admin', false).neq('id', currentUser.id).order('last_name')
+      .select('id, first_name, last_name, job_title, is_optional, is_archived')
+      .eq('is_admin', false).eq('is_archived', false).neq('id', currentUser.id).order('last_name')
     if (emps) setEmployees(emps)
     // Load live reason categories (fall back to hardcoded if DB is empty)
     const { data: reasonRows } = await supabase.from('custom_lists')
@@ -243,7 +243,7 @@ export default function EmployeePage() {
                 <label className="form-label">Give Sparks To</label>
                 <select className="form-select" value={selEmp} onChange={e => { setSelEmp(e.target.value); setAmount(1); setMsg(null) }}>
                   <option value="">Select employee...</option>
-                  {employees.map(e => {
+                  {employees.filter(e => !e.is_optional).map(e => {
                     const given = givenToday[e.id] || 0; const canGive = PER_PERSON_CAP - given
                     return <option key={e.id} value={e.id} disabled={canGive <= 0 || dailyRemaining <= 0}>
                       {e.first_name} {e.last_name}{e.job_title ? ` — ${e.job_title}` : ''}{canGive <= 0 ? ' (limit reached)' : given > 0 ? ` (${given} given)` : ''}
@@ -321,7 +321,7 @@ export default function EmployeePage() {
             </div>
           </div>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:'10px',marginBottom:'16px'}}>
-            {employees.map(emp => {
+            {employees.filter(emp => !emp.is_optional).map(emp => {
               const alreadyGiven = givenToday[emp.id] || 0
               const canGive = Math.min(PER_PERSON_CAP - alreadyGiven, dailyRemaining)
               const val = listAmounts[emp.id] || ''

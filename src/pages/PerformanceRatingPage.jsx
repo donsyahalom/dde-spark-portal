@@ -88,7 +88,7 @@ export default function PerformanceRatingPage() {
 
   const isAdmin = currentUser?.is_admin
   const grade = currentUser?.job_grade || ''
-  const isForeman = isAdmin || /^[FP]/.test(grade) || grade === 'Owner'
+  const isForeman = isAdmin || /^[FP]/.test(grade) || grade === 'Owner' || currentUser?.is_optional
 
   // ── Fetch team members for this foreman ───────────────────────────────────
   const fetchTeam = useCallback(async () => {
@@ -155,9 +155,15 @@ export default function PerformanceRatingPage() {
     return open || null
   }, [selectedEmpId, cycles])
 
-  const selectedEmployee = useMemo(() =>
-    teamMembers.find(e => e.id === selectedEmpId) || null,
-  [teamMembers, selectedEmpId])
+  const selectedEmployee = useMemo(() => {
+    // First try team members list; fall back to the employee data embedded
+    // in the cycle row — this ensures grades like F4 that aren't in the
+    // foreman's own team membership list can still be rated.
+    const fromTeam = teamMembers.find(e => e.id === selectedEmpId)
+    if (fromTeam) return fromTeam
+    const fromCycle = cycles.find(c => c.employee_id === selectedEmpId)?.employee
+    return fromCycle || null
+  }, [teamMembers, selectedEmpId, cycles])
 
   useEffect(() => {
     if (!selectedCycle) { setAnswers({}); setProfile(null); setGradeResp(null); return }
@@ -239,7 +245,7 @@ export default function PerformanceRatingPage() {
       <div className="card" style={{ textAlign:'center', padding:'60px 24px' }}>
         <div style={{ fontSize:'3rem', marginBottom:'16px' }}>🔒</div>
         <h2 style={{ color:'var(--gold)', fontFamily:'var(--font-display)', marginBottom:'8px' }}>Access Restricted</h2>
-        <p style={{ color:'var(--white-dim)' }}>Performance evaluations are available to foreman and above.</p>
+        <p style={{ color:'var(--white-dim)' }}>Performance evaluations are available to foreman, management, and above.</p>
       </div>
     )
   }
