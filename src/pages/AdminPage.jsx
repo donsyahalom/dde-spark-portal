@@ -198,6 +198,9 @@ export default function AdminPage() {
   const [reportData, setReportData] = useState(null)
   const [reportLoading, setReportLoading] = useState(false)
   const [unusedData, setUnusedData] = useState(null)
+  const [usedData,   setUsedData]   = useState(null)
+  const [logData,    setLogData]    = useState(null)
+  const [activeReport, setActiveReport] = useState(null) // 'used'|'unused'|'log'
   const reportRef = useRef(null)
 
   useEffect(() => { fetchAll() }, [])
@@ -575,26 +578,28 @@ export default function AdminPage() {
     const accrual = parseInt(form.daily_accrual) || 0
     const { error } = await supabase.from('employees').insert({
       first_name: form.first_name.trim(), last_name: form.last_name.trim(),
-      email: form.email.toLowerCase().trim(), phone: form.phone.trim(), carrier: form.carrier,
+      email: form.email.toLowerCase().trim(),
       password_hash: 'spark123', must_change_password: true,
       vested_sparks: 0, unvested_sparks: parseInt(form.initial_sparks) || 0,
       daily_accrual: accrual, daily_sparks_remaining: accrual,
-      job_grade: form.job_grade, job_title: form.job_title,
       is_management: form.is_management || MANAGEMENT_GRADES.includes(form.job_grade),
-      has_spark_list: form.has_spark_list,
+      has_spark_list: form.has_spark_list || false,
       is_optional: form.is_optional || false,
-      notify_email: form.notify_email, notify_sms: form.notify_sms,
-      wage_type: form.wage_type || 'hourly',
-      wage_amount: parseFloat(form.wage_amount) || 0,
+      notify_email: form.notify_email !== false, notify_sms: form.notify_sms || false,
+      job_grade: form.job_grade || null, job_title: form.job_title || null,
+      phone: form.phone?.trim() || null, carrier: form.carrier || null,
+      wage_type: form.wage_type || 'hourly', wage_amount: parseFloat(form.wage_amount) || 0,
       has_company_vehicle: form.has_company_vehicle || false,
       target_bonus_pct: parseFloat(form.target_bonus_pct) || 0,
       bonus_share_pct: parseFloat(form.bonus_share_pct) || 0,
+      has_executive_dashboard: form.has_executive_dashboard || false,
     })
     setLoading(false)
     if (error) { showMsg('error', error.message); return }
     showMsg('success', `${form.first_name} ${form.last_name} added!`)
     setForm(emptyForm); fetchAll()
   }
+
 
   const removeEmployee = async (emp) => {
     if (!window.confirm(`Remove ${emp.first_name} ${emp.last_name}? Cannot be undone.`)) return
@@ -649,29 +654,35 @@ export default function AdminPage() {
     setLoading(true)
     const oldV = editEmp.vested_sparks || 0, oldU = editEmp.unvested_sparks || 0
     const newV = parseInt(editValues.vested_sparks) || 0, newU = parseInt(editValues.unvested_sparks) || 0
-    await supabase.from('employees').update({
+    const newAccrual = parseInt(editValues.daily_accrual) || 0
+    // Preserve how many sparks the employee has already used this period.
+    // The admin list shows sparks_left_computed (derived from transactions) which is
+    // the accurate remaining count — use that, not the stale daily_sparks_remaining column.
+    const oldAccrual = editEmp.daily_accrual || 0
+    const accurateRemaining = editEmp.sparks_left_computed ?? editEmp.daily_sparks_remaining ?? oldAccrual
+    const alreadyUsed = Math.max(0, oldAccrual - accurateRemaining)
+    const newRemaining = Math.max(0, newAccrual - alreadyUsed)
+    const { error: saveErr } = await supabase.from('employees').update({
       first_name: editValues.first_name, last_name: editValues.last_name,
       email: editValues.email.toLowerCase(), phone: editValues.phone, carrier: editValues.carrier || '',
       vested_sparks: newV, unvested_sparks: newU,
-      daily_accrual: parseInt(editValues.daily_accrual) || 0,
+      daily_accrual: newAccrual, daily_sparks_remaining: newRemaining,
       job_grade: editValues.job_grade, job_title: editValues.job_title,
       is_management: editValues.is_management || MANAGEMENT_GRADES.includes(editValues.job_grade),
       has_spark_list: editValues.has_spark_list,
       is_optional: editValues.is_optional || false,
       notify_email: editValues.notify_email, notify_sms: editValues.notify_sms,
-      // compensation
       wage_type: editValues.wage_type || 'hourly',
       wage_amount: parseFloat(editValues.wage_amount) || 0,
       has_company_vehicle: editValues.has_company_vehicle || false,
       target_bonus_pct: parseFloat(editValues.target_bonus_pct) || 0,
       bonus_share_pct: parseFloat(editValues.bonus_share_pct) || 0,
-      show_wage: editValues.show_wage,
-      show_range: editValues.show_range,
-      show_target_bonus: editValues.show_target_bonus,
-      show_bonus_share: editValues.show_bonus_share,
+      show_wage: editValues.show_wage, show_range: editValues.show_range,
+      show_target_bonus: editValues.show_target_bonus, show_bonus_share: editValues.show_bonus_share,
       has_executive_dashboard: editValues.has_executive_dashboard || false,
       updated_at: new Date().toISOString()
     }).eq('id', editEmp.id)
+    if (saveErr) { setLoading(false); showMsg('error', 'Save failed: ' + saveErr.message); return }
     const vd = newV - oldV, ud = newU - oldU
     if (vd !== 0 || ud !== 0) {
       await supabase.from('spark_transactions').insert({
@@ -682,6 +693,7 @@ export default function AdminPage() {
     }
     setLoading(false); setEditEmp(null); showMsg('success', 'Employee updated!'); fetchAll()
   }
+
 
   const processCashout = async () => {
     const n = parseInt(cashoutSparks)
@@ -718,26 +730,60 @@ export default function AdminPage() {
     showMsg('success', `Test ${testChannel} sent to ${emp.first_name} ${emp.last_name}`)
   }
 
-  const runReport = async () => {
-    setReportLoading(true)
-    let q = supabase.from('spark_transactions')
-      .select('*, from_emp:from_employee_id(first_name,last_name), to_emp:to_employee_id(first_name,last_name)')
-      .gte('created_at', reportFrom + 'T00:00:00').lte('created_at', reportTo + 'T23:59:59')
-      .order('created_at', { ascending: false })
-    if (reportTypeFilter !== 'all') q = q.eq('transaction_type', reportTypeFilter)
-    const { data: txns } = await q
-    const { data: cashouts } = await supabase.from('spark_cashouts')
-      .select('*, employee:employee_id(first_name,last_name), admin:admin_id(first_name,last_name)')
-      .gte('cashed_out_at', reportFrom + 'T00:00:00').lte('cashed_out_at', reportTo + 'T23:59:59')
-      .order('cashed_out_at', { ascending: false })
-    // Total assigned = sum of positive-amount assign transactions (sparks given TO employees)
-    const assignTxns = (txns || []).filter(t => t.transaction_type === 'assign' && t.amount > 0)
-    const totalAssigned = assignTxns.reduce((s, t) => s + t.amount, 0)
-    const totalCashedOut = (cashouts || []).reduce((s, c) => s + (c.sparks_redeemed || 0), 0)
-    // Re-fetch live employee balances so In System reflects current state
-    const { data: allEmps } = await supabase.from('employees').select('vested_sparks,unvested_sparks').eq('is_admin', false)
-    const totalInSystem = (allEmps || []).reduce((s, e) => s + (e.vested_sparks || 0) + (e.unvested_sparks || 0), 0)
-    setReportData({ txns: txns || [], cashouts: cashouts || [], totalAssigned, totalCashedOut, totalInSystem })
+  // Helper: fetch all rows across paginated Supabase responses (avoids default 1000-row cap)
+  const fetchAllRows = async (buildQuery) => {
+    const PAGE = 1000
+    let page = 0, allRows = []
+    while (true) {
+      const { data, error } = await buildQuery(page * PAGE, PAGE)
+      if (error || !data || data.length === 0) break
+      allRows = allRows.concat(data)
+      if (data.length < PAGE) break
+      page++
+    }
+    return allRows
+  }
+
+  // ── Used Sparks report: per-employee totals for the selected date range ──
+  const runUsedReport = async () => {
+    setReportLoading(true); setActiveReport('used')
+    setUnusedData(null); setLogData(null); setReportData(null)
+    const [{ data: emps }, { data: sentTxns }] = await Promise.all([
+      supabase.from('employees').select('id,first_name,last_name,job_title,daily_accrual,is_management,is_optional').eq('is_admin', false),
+      supabase.from('spark_transactions')
+        .select('from_employee_id,amount')
+        .eq('transaction_type','assign').gt('amount',0)
+        .gte('created_at', reportFrom + 'T00:00:00').lte('created_at', reportTo + 'T23:59:59'),
+    ])
+    const sentMap = {}
+    ;(sentTxns||[]).forEach(t => { sentMap[t.from_employee_id] = (sentMap[t.from_employee_id]||0) + t.amount })
+    const enriched = (emps||[])
+      .map(e => ({ ...e, sent_this_period: sentMap[e.id]||0 }))
+      .filter(e => sentMap[e.id] > 0)
+      .sort((a,b) => b.sent_this_period - a.sent_this_period)
+    setUsedData({ employees: enriched, totalSent: enriched.reduce((s,e)=>s+e.sent_this_period,0), reportFrom, reportTo })
+    setReportLoading(false)
+  }
+
+  // ── Spark Log report: full transaction list for the selected date range ──
+  const runLogReport = async () => {
+    setReportLoading(true); setActiveReport('log')
+    setUnusedData(null); setUsedData(null); setReportData(null)
+    const txns = await fetchAllRows((from, limit) => {
+      let q = supabase.from('spark_transactions')
+        .select('*, from_emp:from_employee_id(first_name,last_name), to_emp:to_employee_id(first_name,last_name)')
+        .gte('created_at', reportFrom + 'T00:00:00').lte('created_at', reportTo + 'T23:59:59')
+        .order('created_at', { ascending: false }).range(from, from + limit - 1)
+      if (reportTypeFilter !== 'all') q = q.eq('transaction_type', reportTypeFilter)
+      return q
+    })
+    const cashouts = await fetchAllRows((from, limit) =>
+      supabase.from('spark_cashouts')
+        .select('*, employee:employee_id(first_name,last_name), admin:admin_id(first_name,last_name)')
+        .gte('cashed_out_at', reportFrom + 'T00:00:00').lte('cashed_out_at', reportTo + 'T23:59:59')
+        .order('cashed_out_at', { ascending: false }).range(from, from + limit - 1)
+    )
+    setLogData({ txns: txns||[], cashouts: cashouts||[], reportFrom, reportTo })
     setReportLoading(false)
   }
 
@@ -786,6 +832,7 @@ export default function AdminPage() {
 
     // Unused = non-management, non-optional employees who still have sparks to give
     const withUnused = enriched.filter(e => !e.is_management && !e.is_optional && e.sparks_left_computed > 0)
+    setUsedData(null); setLogData(null); setReportData(null); setActiveReport('unused')
     setUnusedData({
       employees: withUnused,
       totalUnused: withUnused.reduce((s, e) => s + e.sparks_left_computed, 0),
@@ -796,23 +843,33 @@ export default function AdminPage() {
   }
 
   const exportCSV = () => {
-    if (!reportData && !unusedData) return
-    let csv = ''
-    if (unusedData) {
-      csv = 'Employee,Job Title,Job Grade,Unused Sparks,Daily Accrual\n'
-      unusedData.employees.forEach(e => { csv += `"${e.first_name} ${e.last_name}","${e.job_title || ''}","${e.job_grade || ''}",${e.sent_this_period||0},${e.sparks_left_computed||0},${e.daily_accrual || 0}\n` })
-      csv += `\nTotal Unused,${unusedData.totalUnused}\n`
-    } else {
-      csv = 'Date,From,To,Amount,Type,Reason/Note,Status\n'
-      reportData.txns.forEach(t => {
-        const from = t.from_emp ? `${t.from_emp.first_name} ${t.from_emp.last_name}` : ''
-        const to = t.to_emp ? `${t.to_emp.first_name} ${t.to_emp.last_name}` : ''
-        csv += `"${new Date(t.created_at).toLocaleDateString()}","${from}","${to}",${t.amount},"${t.transaction_type}","${t.reason || t.note || ''}","${t.vested ? 'Vested' : 'Pending'}"\n`
+    let csv = '', filename = 'dde-sparks-report.csv'
+    if (activeReport === 'unused' && unusedData) {
+      filename = `dde-unused-sparks-${unusedData.reportDate}.csv`
+      csv = 'Employee,Job Title,Sent,Sparks Left,Accrual\n'
+      unusedData.employees.forEach(e => {
+        csv += `"${e.first_name} ${e.last_name}","${e.job_title||''}",${e.sent_this_period||0},${e.sparks_left_computed||0},${e.daily_accrual||0}\n`
       })
-    }
+      csv += `\nTotal Unused,${unusedData.totalUnused}\n`
+    } else if (activeReport === 'used' && usedData) {
+      filename = `dde-used-sparks-${reportFrom}-to-${reportTo}.csv`
+      csv = 'Employee,Job Title,Sparks Sent\n'
+      usedData.employees.forEach(e => {
+        csv += `"${e.first_name} ${e.last_name}","${e.job_title||''}",${e.sent_this_period||0}\n`
+      })
+      csv += `\nTotal Sent,${usedData.totalSent}\n`
+    } else if (activeReport === 'log' && logData) {
+      filename = `dde-spark-log-${reportFrom}-to-${reportTo}.csv`
+      csv = 'Date,From,To,Amount,Type,Reason/Note,Status\n'
+      logData.txns.forEach(t => {
+        const from = t.from_emp ? `${t.from_emp.first_name} ${t.from_emp.last_name}` : ''
+        const to   = t.to_emp   ? `${t.to_emp.first_name} ${t.to_emp.last_name}`     : ''
+        csv += `"${new Date(t.created_at).toLocaleDateString()}","${from}","${to}",${t.amount},"${t.transaction_type}","${t.reason||t.note||''}","${t.vested?'Vested':'Pending'}"\n`
+      })
+    } else { return }
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = `dde-sparks-${reportFrom}.csv`; a.click()
+    const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
     URL.revokeObjectURL(url)
   }
 
@@ -1596,13 +1653,14 @@ export default function AdminPage() {
       {/* ── REPORTS ── */}
       {tab==='reports'&&(
         <div>
+          {/* ── Filter bar ── */}
           <div className="card" style={{marginBottom:'16px'}}>
-            <div className="card-title"><span className="icon">📊</span> Report Filters</div>
+            <div className="card-title"><span className="icon">📊</span> Reports</div>
             <div style={{display:'flex',gap:'12px',alignItems:'flex-end',flexWrap:'wrap'}}>
               <div className="form-group" style={{marginBottom:0}}><label className="form-label">From</label><input type="date" className="form-input" style={{width:'auto'}} value={reportFrom} onChange={e=>setReportFrom(e.target.value)} /></div>
               <div className="form-group" style={{marginBottom:0}}><label className="form-label">To</label><input type="date" className="form-input" style={{width:'auto'}} value={reportTo} onChange={e=>setReportTo(e.target.value)} /></div>
               <div className="form-group" style={{marginBottom:0}}>
-                <label className="form-label">Type</label>
+                <label className="form-label">Type <span style={{fontSize:'0.7rem',color:'var(--white-dim)'}}>(Log only)</span></label>
                 <select className="form-select" style={{minWidth:'160px'}} value={reportTypeFilter} onChange={e=>setReportTypeFilter(e.target.value)}>
                   <option value="all">All Types</option>
                   <option value="assign">Peer Sparks</option>
@@ -1610,34 +1668,65 @@ export default function AdminPage() {
                   <option value="cashout">Cash Outs</option>
                 </select>
               </div>
-              <button className="btn btn-gold btn-sm" onClick={runReport} disabled={reportLoading}>📊 Run Report</button>
-              <button className="btn btn-outline btn-sm" onClick={runUnusedReport} disabled={reportLoading}>🔍 Unused Sparks</button>
+              <button className="btn btn-gold btn-sm" onClick={runUsedReport} disabled={reportLoading}>✅ Used Sparks</button>
+              <button className="btn btn-outline btn-sm" onClick={runUnusedReport} disabled={reportLoading}>🔥 Unused Sparks</button>
+              <button className="btn btn-outline btn-sm" onClick={runLogReport} disabled={reportLoading}>📋 Log</button>
             </div>
           </div>
-          {(reportData||unusedData)&&(
+
+          {/* ── Export buttons — only shown when a report is active ── */}
+          {activeReport&&(usedData||unusedData||logData)&&(
             <div style={{display:'flex',gap:'10px',marginBottom:'16px',flexWrap:'wrap'}}>
               <button className="btn btn-outline btn-sm" onClick={exportCSV}>⬇️ CSV</button>
               <button className="btn btn-outline btn-sm" onClick={exportPDF}>🖨️ PDF</button>
             </div>
           )}
+
           <div ref={reportRef}>
-            {unusedData&&(
-              <div className="card" style={{marginBottom:'16px'}}>
-                <div className="card-title"><span className="icon">🔍</span> Unused Sparks — {unusedData.reportDate}</div>
+
+            {/* ── USED SPARKS ── */}
+            {activeReport==='used'&&usedData&&(
+              <div className="card">
+                <div className="card-title"><span className="icon">✅</span> Used Sparks — {usedData.reportFrom} to {usedData.reportTo}</div>
+                <p style={{fontSize:'0.82rem',color:'var(--white-dim)',marginBottom:'12px'}}>
+                  Employees who sent sparks during this period, sorted by most sent.
+                </p>
+                <div className="stat-grid" style={{marginBottom:'16px'}}>
+                  <div className="stat-card"><div className="stat-value" style={{color:'var(--green-bright)'}}>{usedData.totalSent}</div><div className="stat-label">Total Sent</div></div>
+                  <div className="stat-card"><div className="stat-value">{usedData.employees.length}</div><div className="stat-label">Senders</div></div>
+                </div>
+                {usedData.employees.length>0?(
+                  <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Title</th><th>Sparks Sent</th></tr></thead>
+                    <tbody>{usedData.employees.map(e=>(
+                      <tr key={e.id}>
+                        <td style={{fontWeight:600}}>{e.first_name} {e.last_name}</td>
+                        <td style={{fontSize:'0.82rem',color:'var(--white-dim)'}}>{e.job_title||'—'}</td>
+                        <td><span style={{color:'var(--green-bright)',fontWeight:700}}>✨ {e.sent_this_period}</span></td>
+                      </tr>
+                    ))}</tbody>
+                  </table></div>
+                ):<div className="empty-state"><p>No sparks sent in this range.</p></div>}
+              </div>
+            )}
+
+            {/* ── UNUSED SPARKS ── */}
+            {activeReport==='unused'&&unusedData&&(
+              <div className="card">
+                <div className="card-title"><span className="icon">🔥</span> Unused Sparks — {unusedData.reportDate}</div>
                 <p style={{fontSize:'0.82rem',color:'var(--white-dim)',marginBottom:'12px'}}>
                   Non-management, non-optional employees with unused giving allowance this period
                   {unusedData.periodStart ? ` (since ${unusedData.periodStart})` : ''}.
-                  Computed live from transaction history — not the stored column.
                 </p>
                 <div className="stat-grid" style={{marginBottom:'16px'}}>
                   <div className="stat-card"><div className="stat-value" style={{color:'var(--red)'}}>{unusedData.totalUnused}</div><div className="stat-label">Total Unused</div></div>
                   <div className="stat-card"><div className="stat-value">{unusedData.employees.length}</div><div className="stat-label">w/ Unused</div></div>
                 </div>
                 {unusedData.employees.length>0?(
-                  <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Title</th><th>Grade</th><th>Sent</th><th>Left</th><th>Accrual</th></tr></thead>
+                  <div className="table-wrap"><table><thead><tr><th>Employee</th><th>Title</th><th>Sent</th><th>Left</th><th>Accrual</th></tr></thead>
                     <tbody>{unusedData.employees.map(e=>(
-                      <tr key={e.id}><td style={{fontWeight:600}}>{e.first_name} {e.last_name}</td><td style={{fontSize:'0.82rem'}}>{e.job_title||'—'}</td>
-                        <td><span style={{fontSize:'0.72rem',padding:'2px 5px',background:'rgba(240,192,64,0.1)',borderRadius:'4px',color:'var(--gold)'}}>{e.job_grade||'—'}</span></td>
+                      <tr key={e.id}>
+                        <td style={{fontWeight:600}}>{e.first_name} {e.last_name}</td>
+                        <td style={{fontSize:'0.82rem',color:'var(--white-dim)'}}>{e.job_title||'—'}</td>
                         <td style={{color:'var(--green-bright)',fontWeight:600}}>{e.sent_this_period||0}</td>
                         <td><span style={{color:'var(--red)',fontWeight:700}}>🔥 {e.sparks_left_computed}</span></td>
                         <td style={{color:'var(--white-dim)'}}>{e.daily_accrual||0}</td>
@@ -1647,21 +1736,22 @@ export default function AdminPage() {
                 ):<div className="empty-state"><p>All sparks used! 🎉</p></div>}
               </div>
             )}
-            {reportData&&(
+
+            {/* ── SPARK LOG ── */}
+            {activeReport==='log'&&logData&&(
               <div className="card">
-                <div className="card-title"><span className="icon">📊</span> Activity — {reportFrom} to {reportTo}</div>
+                <div className="card-title"><span className="icon">📋</span> Spark Log — {logData.reportFrom} to {logData.reportTo}</div>
                 <div className="stat-grid" style={{marginBottom:'16px'}}>
-                  <div className="stat-card"><div className="stat-value">{reportData.totalAssigned}</div><div className="stat-label">Assigned</div></div>
-                  <div className="stat-card"><div className="stat-value" style={{color:'var(--green-bright)'}}>{reportData.totalCashedOut}</div><div className="stat-label">Cashed Out</div></div>
-                  <div className="stat-card"><div className="stat-value">{reportData.totalInSystem}</div><div className="stat-label">In System</div></div>
-                  <div className="stat-card"><div className="stat-value">{reportData.txns.length+reportData.cashouts.length}</div><div className="stat-label">Transactions</div></div>
+                  <div className="stat-card"><div className="stat-value">{logData.txns.length}</div><div className="stat-label">Transactions</div></div>
+                  <div className="stat-card"><div className="stat-value">{logData.cashouts.length}</div><div className="stat-label">Cash Outs</div></div>
                 </div>
-                {reportData.cashouts.length>0&&(
+                {logData.cashouts.length>0&&(
                   <div style={{marginBottom:'16px'}}>
                     <div style={{fontFamily:'var(--font-display)',fontSize:'0.78rem',color:'var(--green-bright)',letterSpacing:'0.08em',marginBottom:'8px'}}>💰 CASH OUTS</div>
                     <div className="table-wrap"><table><thead><tr><th>Date</th><th>Employee</th><th>Sparks</th><th>Value</th><th>Note</th><th>Admin</th></tr></thead>
-                      <tbody>{reportData.cashouts.map(co=>(
-                        <tr key={co.id}><td style={{fontSize:'0.78rem',whiteSpace:'nowrap'}}>{new Date(co.cashed_out_at).toLocaleDateString()}</td>
+                      <tbody>{logData.cashouts.map(co=>(
+                        <tr key={co.id}>
+                          <td style={{fontSize:'0.78rem',whiteSpace:'nowrap'}}>{new Date(co.cashed_out_at).toLocaleDateString()}</td>
                           <td style={{fontWeight:600}}>{co.employee?.first_name} {co.employee?.last_name}</td>
                           <td><span className="spark-badge" style={{color:'var(--green-bright)',borderColor:'rgba(94,232,138,0.4)'}}>✨ {co.sparks_redeemed}</span></td>
                           <td style={{fontSize:'0.82rem'}}>{co.redemption_value||'—'}</td>
@@ -1672,9 +1762,9 @@ export default function AdminPage() {
                     </table></div>
                   </div>
                 )}
-                {reportData.txns.length>0&&(
+                {logData.txns.length>0?(
                   <div className="table-wrap"><table><thead><tr><th>Date</th><th>From</th><th>To</th><th>Amt</th><th>Type</th><th>Reason</th><th>Status</th></tr></thead>
-                    <tbody>{reportData.txns.map(txn=>{
+                    <tbody>{logData.txns.map(txn=>{
                       const ti=TYPE_LABELS[txn.transaction_type]||{label:txn.transaction_type,color:'gold'}
                       return (<tr key={txn.id}>
                         <td style={{fontSize:'0.78rem',whiteSpace:'nowrap'}}>{new Date(txn.created_at).toLocaleDateString()}</td>
@@ -1687,10 +1777,10 @@ export default function AdminPage() {
                       </tr>)
                     })}</tbody>
                   </table></div>
-                )}
-                {reportData.txns.length===0&&reportData.cashouts.length===0&&<div className="empty-state"><p>No transactions in this range</p></div>}
+                ):<div className="empty-state"><p>No transactions in this range.</p></div>}
               </div>
             )}
+
           </div>
         </div>
       )}

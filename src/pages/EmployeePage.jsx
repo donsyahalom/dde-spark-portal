@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { assignSparks } from '../lib/sparkHelpers'
+import { usePermissions } from '../hooks/usePermissions'
 import { buildReason, getFrequencyLabel, getFrequencyResetDesc, getPeriodLabel, REASON_CATEGORIES as REASON_FALLBACK } from '../lib/constants'
 import { addDays, format, differenceInHours, differenceInDays } from 'date-fns'
 
@@ -36,6 +37,10 @@ export default function EmployeePage() {
 
   const isManagement = me?.is_management || false
   const hasList = me?.has_spark_list || false
+  const { detailOn } = usePermissions()
+  const canSendSparks = detailOn('my_sparks', 'can_send_sparks')
+  const showBalance   = detailOn('my_sparks', 'show_balance')
+  const showHistory   = detailOn('my_sparks', 'show_history')
 
   useEffect(() => { fetchAll() }, [])
 
@@ -201,7 +206,7 @@ export default function EmployeePage() {
       )}
       <h1 className="page-title">My Sparks</h1>
       <p className="page-subtitle">Recognize your colleagues with sparks</p>
-      <div className="stat-grid">
+      {showBalance && <div className="stat-grid">
         <div className="stat-card"><div className="stat-value" style={{color:'var(--gold-light)'}}>{totalSparks}</div><div className="stat-label">Total Sparks</div></div>
         <div className="stat-card"><div className="stat-value" style={{color:'var(--green-bright)'}}>{availableToRedeem}</div><div className="stat-label">Available to Redeem</div></div>
         {settings.vesting_period_days > 0 && (
@@ -216,7 +221,7 @@ export default function EmployeePage() {
           </div>
           <div className="stat-label">{freqLabel} Sparks Left</div>
         </div>
-      </div>
+      </div>}
 
       {/* Redemption notice */}
       <div style={{background:'rgba(240,192,64,0.08)',border:'1px solid rgba(240,192,64,0.25)',borderRadius:'10px',padding:'12px 16px',marginBottom:'20px',display:'flex',alignItems:'flex-start',gap:'10px'}}>
@@ -228,7 +233,8 @@ export default function EmployeePage() {
       </div>
 
       {/* GIVE A SPARK */}
-      <div className="card" style={{marginBottom:'20px'}}>
+      {canSendSparks && (
+        <div className="card" style={{marginBottom:'20px'}}>
         <div className="card-title"><span className="icon">✨</span> Give Sparks</div>
         {msg && <div className={`alert alert-${msg.type}`}>{msg.text}</div>}
         {dailyRemaining === 0 ? (
@@ -292,6 +298,8 @@ export default function EmployeePage() {
           </>
         )}
       </div>
+      )}
+
 
       {/* LIST DISTRIBUTION */}
       {hasList && (
@@ -352,16 +360,16 @@ export default function EmployeePage() {
       )}
 
       {/* SPARKS GIVEN */}
-      <div className="card" style={{marginBottom:'20px'}}>
+      {showHistory && <div className="card" style={{marginBottom:'20px'}}>
         <div className="card-title"><span className="icon">📤</span> Sparks I've Given</div>
         <TxnTable rows={historyGiven} mode="given" showVesting={settings.vesting_period_days > 0} />
-      </div>
+      </div>}
 
       {/* SPARKS RECEIVED */}
-      <div className="card" style={{marginBottom:'20px'}}>
+      {showHistory && <div className="card" style={{marginBottom:'20px'}}>
         <div className="card-title"><span className="icon">📥</span> Sparks I've Received</div>
         <TxnTable rows={historyReceived} mode="received" showVesting={settings.vesting_period_days > 0} />
-      </div>
+      </div>}
 
       {/* WATCHLIST */}
       {isManagement && (

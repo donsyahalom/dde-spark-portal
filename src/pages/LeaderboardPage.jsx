@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { assignSparks } from '../lib/sparkHelpers'
+import { usePermissions } from '../hooks/usePermissions'
 import { buildReason, getRangeWindow } from '../lib/constants'
 
 // ── Title hierarchy for "Title / Rank" sort ───────────────────────────────────
@@ -30,7 +31,7 @@ const SORT_OPTIONS = [
 // an inline edit/delete panel. Non-admins see the like button as before.
 // On delete:  recipient loses sparks (vested first, then unvested), sender gets accrual back.
 // On edit:    if recipient changes, old recipient loses, new recipient gains. Amount diffs adjust.
-function SparkLogTable({ txnLog, txnLoading, likes, myLikes, isAdmin, currentUser, onLike, onRefresh }) {
+function SparkLogTable({ txnLog, txnLoading, likes, myLikes, isAdmin, showLikeBtn = false, currentUser, onLike, onRefresh }) {
   const [editId, setEditId] = useState(null)
   const [editValues, setEditValues] = useState({})
   const [employees, setEmployees] = useState([])
@@ -602,6 +603,10 @@ export default function LeaderboardPage() {
   const usedTitles = [...new Set(employees.map(e => e.job_title).filter(Boolean))]
     .sort((a, b) => getTitleOrder(a) - getTitleOrder(b) || a.localeCompare(b))
   const isAdmin = currentUser?.is_admin
+  const { detailOn } = usePermissions()
+  const showJobGrade  = isAdmin || detailOn('leaderboard', 'show_job_grade')
+  const showSparkLog  = isAdmin || detailOn('leaderboard', 'show_spark_log')
+  const showLikeBtn   = !isAdmin && detailOn('leaderboard', 'show_like_button')
 
   return (
     <div className="fade-in">
@@ -640,7 +645,7 @@ export default function LeaderboardPage() {
                       <div style={{display:'flex',alignItems:'center',gap:'6px',flexWrap:'wrap'}}>
                         <span style={{fontWeight:700,fontSize:'0.95rem'}}>{emp.first_name} {emp.last_name}</span>
                         {emp.job_title && <span style={{fontSize:'0.68rem',color:'var(--gold-dark)',background:'rgba(240,192,64,0.1)',border:'1px solid rgba(240,192,64,0.2)',borderRadius:'10px',padding:'1px 6px'}}>{emp.job_title}</span>}
-                        {isAdmin && emp.job_grade && <span style={{fontSize:'0.65rem',color:'var(--white-dim)'}}>{emp.job_grade}</span>}
+                        {showJobGrade && emp.job_grade && <span style={{fontSize:'0.65rem',color:'var(--white-dim)'}}>{emp.job_grade}</span>}
                       </div>
                       <div style={{background:'rgba(0,0,0,0.4)',borderRadius:'10px',height:'4px',overflow:'hidden',marginTop:'4px'}}>
                         <div style={{height:'100%',background:'linear-gradient(90deg,var(--gold-dark),var(--gold))',borderRadius:'10px',width:`${pct}%`,transition:'width 0.5s ease'}}></div>
@@ -655,7 +660,8 @@ export default function LeaderboardPage() {
         }
       </div>
 
-      {/* Transaction Log */}
+      {/* Transaction Log — only visible if user has show_spark_log permission */}
+      {showSparkLog && (
       <div className="card">
         <div className="card-title"><span className="icon">📋</span> Sparks Activity Log</div>
         <p style={{color:'var(--white-dim)',fontSize:'0.82rem',marginBottom:'16px'}}>
@@ -667,11 +673,13 @@ export default function LeaderboardPage() {
           likes={likes}
           myLikes={myLikes}
           isAdmin={isAdmin}
+          showLikeBtn={showLikeBtn}
           currentUser={currentUser}
           onLike={handleLike}
           onRefresh={() => fetchTxnLog(logRange, logDays)}
         />
       </div>
+      )} {/* end showSparkLog */}
 
       {/* Match Modal */}
       {matchModal && (
