@@ -97,7 +97,7 @@ Deno.serve(async (req) => {
         from: 'DDE SPARKS Portal UAT <lena@dubaldo.com>',
         
         to:   testInbox,                             // ← redirected, never emp.email
-        subject: `[UAT] Spark Summary for ${emp.first_name} ${emp.last_name} — ${periodStart} to ${periodEnd}`,
+        subject: `[UAT] Sparks Summary for ${emp.first_name} ${emp.last_name} — ${periodStart} to ${periodEnd}`,
         html,
       })
     })
@@ -164,8 +164,8 @@ function buildEmailHTML({ emp, given, received, totalGiven, totalReceived, total
   ${uatBanner}
   <div class="header">
     <div style="font-size:2rem;">✨</div>
-    <h1>DDE Spark Summary</h1>
-    <p>Hi ${emp.first_name}! Here's your spark activity for ${periodStart} – ${periodEnd}</p>
+    <h1>DDE Sparks Summary</h1>
+    <p>Hi ${emp.first_name}! Here's your sparks activity for ${periodStart} – ${periodEnd}</p>
   </div>
 
   <div class="stats">
@@ -193,7 +193,7 @@ function buildEmailHTML({ emp, given, received, totalGiven, totalReceived, total
     </table>
   </div>` : ''}
 
-  <div class="footer">DDE Spark Portal &nbsp;·&nbsp; D. DuBaldo Electric<br>This is an automated summary email.</div>
+  <div class="footer">DDE Sparks Portal &nbsp;·&nbsp; D. DuBaldo Electric<br>This is an automated summary email.</div>
 </div>
 </body></html>`
 }
