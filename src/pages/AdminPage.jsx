@@ -669,11 +669,11 @@ export default function AdminPage() {
     const newV = parseInt(editValues.vested_sparks) || 0, newU = parseInt(editValues.unvested_sparks) || 0
     const newAccrual = parseInt(editValues.daily_accrual) || 0
     // Preserve how many sparks the employee has already used this period.
-    // used = old accrual - old remaining (can't go negative).
-    // New remaining = new accrual - already used, floored at 0.
+    // The admin list shows sparks_left_computed (derived from transactions) which is
+    // the accurate remaining count — use that, not the stale daily_sparks_remaining column.
     const oldAccrual = editEmp.daily_accrual || 0
-    const oldRemaining = editEmp.daily_sparks_remaining || 0
-    const alreadyUsed = Math.max(0, oldAccrual - oldRemaining)
+    const accurateRemaining = editEmp.sparks_left_computed ?? editEmp.daily_sparks_remaining ?? oldAccrual
+    const alreadyUsed = Math.max(0, oldAccrual - accurateRemaining)
     const newRemaining = Math.max(0, newAccrual - alreadyUsed)
     const core = {
       first_name: editValues.first_name, last_name: editValues.last_name,
