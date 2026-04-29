@@ -27,9 +27,15 @@
 // "Empire Industries"), so the split-by-space heuristic drops every row.
 // Today the underlying sage.* data is single-source-company (DuBaldo),
 // so PC subdivision (DDE / DCM / SILK) has no DB-side support yet — we
-// pass the full live result through unfiltered.  Add a real
-// profit_center column upstream and re-introduce server-side filtering
-// when that lands.
+// pass the full live result through unfiltered.
+//
+// Job enrichment (2026-04-29):
+// The Jobs P&L page expects rolled-up fields (directCost, gpDol, gpPct,
+// contractedRetention, releaseSchedule) that the mock's enrichJob()
+// helper used to add in opsMockData.  The view layer projects only the
+// raw inputs (split cost buckets, contract amount, retainagePct).  We
+// re-create enrichJob here so the live job rows render in the table and
+// the expanded row doesn't crash on undefined values.
 
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
@@ -45,6 +51,53 @@ import {
   PURCHASE_ORDERS,
   WORK_ORDERS,
 } from '../lib/opsMockData'
+
+// Add the rolled-up / derived fields the page components read.  Safe
+// numeric defaults so chart helpers (buildWeekly, jobProductivity) never
+// see undefined inputs.
+function enrichJob(j) {
+  const labor      = Number(j.labor)      || 0
+  const material   = Number(j.material)   || 0
+  const subs       = Number(j.subs)       || 0
+  const equipment  = Number(j.equipment)  || 0
+  const bonds      = Number(j.bonds)      || 0
+  const permits    = Number(j.permits)    || 0
+  const other      = Number(j.other)      || 0
+  const directCost = labor + material + subs + equipment + bonds + permits + other
+
+  const revenue = Number(j.revenue) || 0
+  const gpDol   = revenue - directCost
+  const gpPct   = revenue ? +(((gpDol / revenue) * 100).toFixed(1)) : 0
+  const subPct  = directCost ? +(((subs / directCost) * 100).toFixed(1)) : 0
+
+  const contract           = Number(j.contract)     || 0
+  const retainagePct       = Number(j.retainagePct) || 0
+  const contractedRetention = +((contract * retainagePct) / 100).toFixed(2)
+
+  return {
+    ...j,
+    // Rolled-up + derived
+    directCost,
+    gpDol,
+    gpPct,
+    subPct,
+    contractedRetention,
+    // Page expects an array — stub empty until upstream lands.
+    releaseSchedule: Array.isArray(j.releaseSchedule) ? j.releaseSchedule : [],
+    // Back-compat aliases used by older table/chart code in the portal.
+    lab: labor,
+    mat: material,
+    sub: subs,
+    // Defensive numeric defaults so chart math never sees undefined.
+    revenue,
+    contract,
+    retainagePct,
+    retainageHeld: Number(j.retainageHeld) || 0,
+    pctCmp:        Number(j.pctCmp)        || 0,
+    budgetLaborHrs: Number(j.budgetLaborHrs) || 0,
+    actualLaborHrs: Number(j.actualLaborHrs) || 0,
+  }
+}
 
 async function fetchOpsSlices() {
   // Run the view queries in parallel.  Each returns { data, error };
@@ -67,10 +120,10 @@ async function fetchOpsSlices() {
   if (firstError) throw firstError.error
 
   return {
-    jobs:         jobs.data || [],
-    arInvoices:   ar.data || [],
-    apInvoices:   ap.data || [],
-    payrollLines: pay.data || [],
+    jobs:         (jobs.data || []).map(enrichJob),
+    arInvoices:   ar.data   || [],
+    apInvoices:   ap.data   || [],
+    payrollLines: pay.data  || [],
     lastSync:     lastSync?.data || null,
   }
 }
@@ -130,14 +183,14 @@ export function useOpsDataLive() {
     data: {
       kpis:            KPIS[pc],            // still mock
       pnl:             pnlScaled,           // still mock
-      jobs:            jobs,                // LIVE — unfiltered
+      jobs:            jobs,                // LIVE (enriched)
       cashflow:        CASHFLOW,            // still mock
-      arInvoices:      arInvoices,          // LIVE — unfiltered
-      apInvoices:      apInvoices,          // LIVE — unfiltered
+      arInvoices:      arInvoices,          // LIVE
+      apInvoices:      apInvoices,          // LIVE
       paymentHistory:  PAYMENT_HISTORY,     // still mock
       kpiSparks:       KPI_SPARKS,          // still mock
       permUsers:       PERM_USERS,          // still mock
-      payrollLines:    payrollLines,        // LIVE — unfiltered
+      payrollLines:    payrollLines,        // LIVE
       purchaseOrders:  PURCHASE_ORDERS,     // still mock (no live source yet)
       workOrders:      WORK_ORDERS,         // still mock (no live source yet)
       arEmailDefaults: AR_EMAIL_DEFAULTS,
