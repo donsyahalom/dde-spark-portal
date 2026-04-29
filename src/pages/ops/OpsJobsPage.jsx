@@ -13,69 +13,118 @@ import { moneyLineOpts, PALETTE } from '../../lib/opsChartOpts'
 
 // Contract-job table columns.  `gpDol`, `gpPct`, `subPct`, `directCost`
 // come from enrichJob().  `productivity` is computed per-row.
+//
+// Each column carries an inline `tooltip` describing the calculation /
+// source so the field crew can see at a glance how a number was derived.
+// The tooltip renders on hover via the native browser title attribute
+// AND a small ⓘ icon next to the header label so it's discoverable.
 const CONTRACT_COLUMNS = [
-  { key: 'num',          label: 'Job #',      type: 'str' },
-  { key: 'name',         label: 'Name',       type: 'str' },
-  { key: 'contract',     label: 'Contract',   type: 'money', align: 'right' },
-  { key: 'revenue',      label: 'Revenue',    type: 'money', align: 'right' },
-  { key: 'directCost',   label: 'Direct Cost',type: 'money', align: 'right' },
-  { key: 'gpDol',        label: 'GP $',       type: 'money', align: 'right' },
-  { key: 'gpPct',        label: 'GP %',       type: 'pct',   align: 'right' },
-  { key: 'pctCmp',       label: '% Cmp',      type: 'pct',   align: 'right' },
-  { key: 'productivity', label: 'Productivity', type: 'prod',align: 'right' },
-  { key: 'status',       label: 'Status',     type: 'str' },
+  { key: 'num',          label: 'Job #',        type: 'str',
+    tooltip: 'Sage short_name for the job, used as the public job number.' },
+  { key: 'name',         label: 'Name',         type: 'str',
+    tooltip: 'Sage job name (sage.jobs.job_name).' },
+  { key: 'contract',     label: 'Contract',     type: 'money', align: 'right',
+    tooltip: 'Original contract amount (sage.jobs.contract_amount). Does not include change orders unless they have been booked into the contract.' },
+  { key: 'revenue',      label: 'Revenue',      type: 'money', align: 'right',
+    tooltip: 'Sum of all AR invoice totals booked to this job (billed-to-date).' },
+  { key: 'directCost',   label: 'Direct Cost',  type: 'money', align: 'right',
+    tooltip: 'Labor + Material + Subs + Equipment + Bonds + Permits + Other, summed from sage.job_cost_transactions. Bonds and Permits are 0 today (no distinct cost-type in Sage v27).' },
+  { key: 'gpDol',        label: 'GP $',         type: 'money', align: 'right',
+    tooltip: 'Gross Profit = Revenue − Direct Cost.' },
+  { key: 'gpPct',        label: 'GP %',         type: 'pct',   align: 'right',
+    tooltip: 'Gross Profit % = (GP $ ÷ Revenue) × 100.' },
+  { key: 'pctCmp',       label: '% Cmp',        type: 'pct',   align: 'right',
+    tooltip: 'Manual override from sage.jobs.percent_complete if a PM has set it. Otherwise computed: (cost-to-date ÷ total budget) × 100, capped at 100%. Returns 0 if no budget on file.' },
+  { key: 'productivity', label: 'Productivity', type: 'prod',  align: 'right',
+    tooltip: 'Earned-value productivity = (budget hrs × % complete) ÷ actual hrs. 1.00 = on plan, >1.00 ahead, <1.00 behind. Shows — when there are no budgeted labor hours.' },
+  { key: 'status',       label: 'Status',       type: 'str',
+    tooltip: 'Active, On Hold, or Closed. Mapped from sage.jobs.status: 0,1=Active, 2=Hold, 3,4=Closed.' },
 ]
 
 // Service-job table (T&M) — different metrics.
 const SERVICE_COLUMNS = [
-  { key: 'num',       label: 'Job #',       type: 'str' },
-  { key: 'name',      label: 'Name',        type: 'str' },
-  { key: 'customer',  label: 'Customer',    type: 'str' },
-  { key: 'revenue',   label: 'T&M Revenue', type: 'money', align: 'right' },
-  { key: 'hours',     label: 'Hours',       type: 'hrs',   align: 'right' },
-  { key: 'avgRate',   label: 'Avg $/hr',    type: 'money', align: 'right' },
-  { key: 'openWos',   label: 'Open WOs',    type: 'num',   align: 'right' },
-  { key: 'status',    label: 'Status',      type: 'str' },
+  { key: 'num',       label: 'Job #',        type: 'str',
+    tooltip: 'Sage short_name for the service job.' },
+  { key: 'name',      label: 'Name',         type: 'str',
+    tooltip: 'Service job name.' },
+  { key: 'customer',  label: 'Customer',     type: 'str',
+    tooltip: 'Job contact (sage.jobs.contact), falling back to job name if blank.' },
+  { key: 'revenue',   label: 'T&M Revenue',  type: 'money', align: 'right',
+    tooltip: 'Sum of all AR invoice totals booked to this service job.' },
+  { key: 'hours',     label: 'Hours',        type: 'hrs',   align: 'right',
+    tooltip: 'Total hours from all work orders attached to this job.' },
+  { key: 'avgRate',   label: 'Avg $/hr',     type: 'money', align: 'right',
+    tooltip: 'Total billed amount ÷ total hours, across all work orders.' },
+  { key: 'openWos',   label: 'Open WOs',     type: 'num',   align: 'right',
+    tooltip: 'Count of work orders with status = "open".' },
+  { key: 'status',    label: 'Status',       type: 'str',
+    tooltip: 'Active, On Hold, or Closed.' },
 ]
 
 // ── Cost-bucket metadata ──
-// Used by both the expanded cost-breakdown chart and the bucket totals
-// row on the contract table footer.
 const COST_BUCKETS = [
   { key: 'labor',     label: 'Labor',     color: PALETTE.blue },
   { key: 'material',  label: 'Material',  color: PALETTE.amber },
   { key: 'subs',      label: 'Subs',      color: PALETTE.red },
   { key: 'equipment', label: 'Equipment', color: PALETTE.purple },
   { key: 'bonds',     label: 'Bonds',     color: PALETTE.green },
-  { key: 'permits',   label: 'Permits',   color: '#E879F9' }, // soft magenta
+  { key: 'permits',   label: 'Permits',   color: '#E879F9' },
   { key: 'other',     label: 'Other',     color: 'rgba(255,255,255,0.45)' },
 ]
 
 function fmtProductivity(p) {
   if (p == null) return '—'
-  // Classify so the reader can sanity-check at a glance:
-  //  ≥ 1.00 on or ahead of plan, 0.90–0.99 slightly behind, < 0.90 behind
   const cls = p >= 1 ? 'ops-text-pos' : p >= 0.9 ? '' : 'ops-text-neg'
   return <span className={cls}>{p.toFixed(2)}</span>
 }
 
+// Renders a column-header cell with the label + an info icon.  The
+// native title attribute gives the hover tooltip; the icon makes the
+// presence of help text visible without any JS or CSS additions.
+function ColumnHeader({ col, sortKey, sortDir, onClick }) {
+  const arrow = sortKey === col.key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
+  return (
+    <th
+      onClick={onClick}
+      className={col.align === 'right' ? 'right' : ''}
+      style={{ cursor: 'pointer', userSelect: 'none' }}
+      title={col.tooltip || ''}
+    >
+      {col.label}
+      {col.tooltip && (
+        <span
+          aria-label={col.tooltip}
+          title={col.tooltip}
+          style={{
+            display: 'inline-block',
+            marginLeft: 4,
+            fontSize: '0.78em',
+            opacity: 0.55,
+            cursor: 'help',
+            verticalAlign: 'baseline',
+          }}
+        >
+          ⓘ
+        </span>
+      )}
+      {arrow}
+    </th>
+  )
+}
+
 export default function OpsJobsPage() {
   const { jobs, purchaseOrders, workOrders } = useOpsData()
-  const [view, setView]       = useState('contract') // 'contract' | 'service'
+  const [view, setView]       = useState('contract')
   const [q, setQ]             = useState('')
   const [status, setStatus]   = useState('all')
   const [sortKey, setSortKey] = useState('revenue')
   const [sortDir, setSortDir] = useState('desc')
   const [expanded, setExpanded] = useState(null)
-  // 'actual' = per-week series; 'accumulated' = running totals.
   const [mode, setMode]       = useState('actual')
 
   const contractJobs = useMemo(() => jobs.filter((j) => j.type === 'contract'), [jobs])
   const serviceJobs  = useMemo(() => jobs.filter((j) => j.type === 'service'),  [jobs])
 
-  // Service-job rollup row — so the contract view always shows a single
-  // "Time & Material" line summarising every service job in the PC.  Mirrors
-  // the Sage "all service work as one category" convention.
   const tmRollup = useMemo(() => {
     if (!serviceJobs.length) return null
     const rev = serviceJobs.reduce((s, j) => s + j.revenue, 0)
@@ -99,8 +148,6 @@ export default function OpsJobsPage() {
     }
   }, [serviceJobs, workOrders])
 
-  // Build service-view rows — one per service job, with hours / avg rate
-  // pulled from the WO list filtered to that job.
   const serviceRows = useMemo(() => {
     return serviceJobs.map((j) => {
       const wos  = workOrders.filter((w) => w.jobNum === j.num)
@@ -117,7 +164,6 @@ export default function OpsJobsPage() {
     })
   }, [serviceJobs, workOrders])
 
-  // Company productivity card — contract jobs only (see helper).
   const prodSummary = useMemo(() => companyProductivity(jobs), [jobs])
 
   const rows = useMemo(() => {
@@ -132,7 +178,6 @@ export default function OpsJobsPage() {
     }
     if (status !== 'all') filtered = filtered.filter((j) => j.status === status)
     filtered.sort((a, b) => {
-      // Keep the T&M rollup pinned to the bottom of the contract view.
       if (a.isRollup && !b.isRollup) return 1
       if (b.isRollup && !a.isRollup) return -1
       const av = a[sortKey]; const bv = b[sortKey]
@@ -225,8 +270,8 @@ export default function OpsJobsPage() {
         title={view === 'contract' ? 'Jobs P&L — Contract' : 'Jobs P&L — Service (T&M)'}
         subtitle={
           view === 'contract'
-            ? 'Click any column header to sort. Click a row to expand cost buckets, POs, weekly curve, and retainage.'
-            : 'Click a row to expand the work-order list for that service job.'
+            ? 'Click any column header to sort. Click a row to expand cost buckets, POs, weekly curve, and retainage. Hover the ⓘ next to any column header to see how the value is calculated.'
+            : 'Click a row to expand the work-order list for that service job. Hover the ⓘ next to any column header to see the data source.'
         }
         right={
           <div className="ops-toolbar">
@@ -262,14 +307,13 @@ export default function OpsJobsPage() {
               <tr>
                 <th style={{ width: 24 }}></th>
                 {columns.map((c) => (
-                  <th
+                  <ColumnHeader
                     key={c.key}
+                    col={c}
+                    sortKey={sortKey}
+                    sortDir={sortDir}
                     onClick={() => toggleSort(c.key)}
-                    className={c.align === 'right' ? 'right' : ''}
-                    style={{ cursor: 'pointer', userSelect: 'none' }}
-                  >
-                    {c.label}{sortKey === c.key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''}
-                  </th>
+                  />
                 ))}
               </tr>
             </thead>
@@ -310,17 +354,13 @@ export default function OpsJobsPage() {
   )
 }
 
-// Running cumulative sum — used when mode === 'accumulated'.
 function runSum(arr) {
   let s = 0
   return arr.map((v) => (s += v))
 }
 
 // ── Contract-job row ──────────────────────────────────────────────
-// Expands into: cost-bucket bar chart, weekly curve, PO table, retainage panel.
 function ContractJobRow({ job, purchaseOrders, expanded, onToggle, fmtCell, columns, mode }) {
-  // T&M rollup row renders a slimmer version — no expanded body because
-  // the detail lives on the Service view.
   if (job.isRollup) {
     return (
       <tr style={{ fontStyle: 'italic', borderTop: '1px dashed var(--border-bright)' }}>
@@ -355,8 +395,6 @@ function ContractJobRow({ job, purchaseOrders, expanded, onToggle, fmtCell, colu
     ],
   }
 
-  // Cost-bucket bar chart: horizontal-ish vertical bars, one per bucket.
-  // Shown as dollars since the reader is scanning magnitudes.
   const bucketValues = COST_BUCKETS.map((b) => job[b.key] || 0)
   const bucketData = {
     labels: COST_BUCKETS.map((b) => b.label),
@@ -423,7 +461,6 @@ function ContractJobRow({ job, purchaseOrders, expanded, onToggle, fmtCell, colu
               </div>
             </div>
 
-            {/* ── Cost buckets ─────────────────────────────────────── */}
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.5fr) minmax(0,1fr)', gap: 14, marginBottom: 14 }}>
               <div>
                 <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>Direct cost breakdown</div>
@@ -455,7 +492,6 @@ function ContractJobRow({ job, purchaseOrders, expanded, onToggle, fmtCell, colu
               </div>
             </div>
 
-            {/* ── Weekly curve ─────────────────────────────────────── */}
             <div style={{ marginBottom: 14 }}>
               <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>
                 Weekly curve <span className="ops-text-dim" style={{ fontWeight: 400 }}>({mode === 'accumulated' ? 'accumulated' : 'actual'})</span>
@@ -465,7 +501,6 @@ function ContractJobRow({ job, purchaseOrders, expanded, onToggle, fmtCell, colu
               </OpsChartBox>
             </div>
 
-            {/* ── Purchase orders ──────────────────────────────────── */}
             <div style={{ marginBottom: 14 }}>
               <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>
                 Purchase orders · outstanding = commitment (variable / direct cost)
@@ -512,7 +547,6 @@ function ContractJobRow({ job, purchaseOrders, expanded, onToggle, fmtCell, colu
               )}
             </div>
 
-            {/* ── Retainage ────────────────────────────────────────── */}
             <div>
               <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>Retainage</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
@@ -566,7 +600,7 @@ function ContractJobRow({ job, purchaseOrders, expanded, onToggle, fmtCell, colu
   )
 }
 
-// ── Service-job row — expands to show its work orders ────────────
+// ── Service-job row ──────────────────────────────────────────────
 function ServiceJobRow({ job, expanded, onToggle, fmtCell, columns }) {
   const chipCls = job.status === 'Closed' ? 'closed' : job.status === 'Hold' ? 'hold' : 'active'
   return (
