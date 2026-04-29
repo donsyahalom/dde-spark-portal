@@ -678,6 +678,7 @@ export default function AdminPage() {
     const accurateRemaining = editEmp.sparks_left_computed ?? editEmp.daily_sparks_remaining ?? oldAccrual
     const alreadyUsed = Math.max(0, oldAccrual - accurateRemaining)
     const newRemaining = Math.max(0, newAccrual - alreadyUsed)
+    // ── Core fields — always saved, guaranteed columns ───────────────────────
     const core = {
       first_name: editValues.first_name, last_name: editValues.last_name,
       email: editValues.email.toLowerCase(), phone: editValues.phone, carrier: editValues.carrier || '',
@@ -691,8 +692,13 @@ export default function AdminPage() {
       notify_email: editValues.notify_email, notify_sms: editValues.notify_sms,
       updated_at: new Date().toISOString()
     }
-    const full = { ...core,
-      wage_type: editValues.wage_type || 'hourly', wage_amount: parseFloat(editValues.wage_amount) || 0,
+    await supabase.from('employees').update(core).eq('id', editEmp.id)
+
+    // ── Compensation fields — saved separately so a schema error here never
+    //    wipes out the core save above ──────────────────────────────────────
+    const comp = {
+      wage_type: editValues.wage_type || 'hourly',
+      wage_amount: parseFloat(editValues.wage_amount) || 0,
       has_company_vehicle: editValues.has_company_vehicle || false,
       target_bonus_pct: parseFloat(editValues.target_bonus_pct) || 0,
       bonus_share_pct: parseFloat(editValues.bonus_share_pct) || 0,
@@ -700,9 +706,10 @@ export default function AdminPage() {
       show_target_bonus: editValues.show_target_bonus, show_bonus_share: editValues.show_bonus_share,
       has_executive_dashboard: editValues.has_executive_dashboard || false,
     }
-    let { error: updateErr } = await supabase.from('employees').update(full).eq('id', editEmp.id)
-    if (updateErr && isSchemaErr(updateErr)) {
-      await supabase.from('employees').update(core).eq('id', editEmp.id)
+    const { error: compErr } = await supabase.from('employees').update(comp).eq('id', editEmp.id)
+    if (compErr && !isSchemaErr(compErr)) {
+      // Real error (not a missing column) — surface it
+      setLoading(false); showMsg('error', 'Compensation save failed: ' + compErr.message); return
     }
     const vd = newV - oldV, ud = newU - oldU
     if (vd !== 0 || ud !== 0) {
