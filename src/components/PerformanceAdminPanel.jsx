@@ -329,17 +329,19 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
   const saveGradeResp = async () => {
     if (!editGradeResp) return
     setGradeRespSaving(true)
-    await supabase.from('perf_grade_responsibilities').upsert({
+    const { error: grErr } = await supabase.from('perf_grade_responsibilities').upsert({
       job_grade: editGradeResp.job_grade,
       responsibilities: gradeRespText,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'job_grade' })
+    setGradeRespSaving(false)
+    if (grErr) { showMsg('Save failed: ' + grErr.message, 'error'); return }
     setGradeResponsibilities(prev => {
       const idx = prev.findIndex(r => r.job_grade === editGradeResp.job_grade)
       const updated = { ...editGradeResp, responsibilities: gradeRespText }
       return idx >= 0 ? prev.map((r, i) => i === idx ? updated : r) : [...prev, updated]
     })
-    setEditGradeResp(null); setGradeRespText(''); setGradeRespSaving(false)
+    setEditGradeResp(null); setGradeRespText('')
     showMsg('Grade responsibilities saved')
   }
 
@@ -356,14 +358,15 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
       bonus_share_pct: parseFloat(gradeCompValues.bonus_share_pct) || 0,
       updated_at: new Date().toISOString(),
     }
-    await supabase.from('perf_grade_compensation').upsert(payload, { onConflict: 'job_grade' })
+    const { error: gcErr } = await supabase.from('perf_grade_compensation').upsert(payload, { onConflict: 'job_grade' })
+    setGradeCompSaving(false)
+    if (gcErr) { showMsg('Save failed: ' + gcErr.message, 'error'); return }
     setGradeCompensation(prev => {
       const idx = prev.findIndex(r => r.job_grade === editGradeComp.job_grade)
       return idx >= 0 ? prev.map((r, i) => i === idx ? payload : r) : [...prev, payload]
     })
     setEditGradeComp(null)
     setGradeCompValues({ wage_type:'hourly', wage_min:'', wage_max:'', target_bonus_pct:'', bonus_share_pct:'' })
-    setGradeCompSaving(false)
     showMsg('Grade compensation saved')
   }
 
@@ -371,17 +374,19 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
   const saveProfile = async () => {
     if (!editProfile) return
     setProfileSaving(true)
-    await supabase.from('perf_employee_profiles').upsert({
+    const { error: profErr } = await supabase.from('perf_employee_profiles').upsert({
       employee_id: editProfile.employee_id,
       responsibilities: profileText,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'employee_id' })
+    setProfileSaving(false)
+    if (profErr) { showMsg('Save failed: ' + profErr.message, 'error'); return }
     setProfiles(prev => {
       const idx = prev.findIndex(p => p.employee_id === editProfile.employee_id)
       const updated = { ...editProfile, responsibilities: profileText }
       return idx >= 0 ? prev.map((p,i) => i===idx ? updated : p) : [...prev, updated]
     })
-    setEditProfile(null); setProfileText(''); setProfileSaving(false)
+    setEditProfile(null); setProfileText('')
     showMsg('Profile saved')
   }
 
