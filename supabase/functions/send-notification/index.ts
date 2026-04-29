@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: false, note: 'No RESEND_API_KEY' }), { headers: { ...cors, 'Content-Type': 'application/json' } })
     }
 
-    const result = await sendViaResend(resendKey, to, subject || 'DDE Spark Portal', html || '')
+    const result = await sendViaResend(resendKey, to, subject || 'DDE Sparks Portal', html || '')
     if (!result.ok && employeeId) {
       await supa.from('notification_log').insert({
         employee_id: employeeId, notification_type: 'test',
