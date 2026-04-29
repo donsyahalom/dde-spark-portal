@@ -233,7 +233,8 @@ export default function EmployeePage() {
       </div>
 
       {/* GIVE A SPARK */}
-      {canSendSparks && (<div className="card" style={{marginBottom:'20px'}}>
+      {canSendSparks && (
+        <div className="card" style={{marginBottom:'20px'}}>
         <div className="card-title"><span className="icon">✨</span> Give Sparks</div>
         {msg && <div className={`alert alert-${msg.type}`}>{msg.text}</div>}
         {dailyRemaining === 0 ? (
@@ -297,9 +298,8 @@ export default function EmployeePage() {
           </>
         )}
       </div>
+      )}
 
-      </div>)}
-      } {/* end canSendSparks */}
 
       {/* LIST DISTRIBUTION */}
       {hasList && (
