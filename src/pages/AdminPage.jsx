@@ -570,12 +570,19 @@ export default function AdminPage() {
     setLoading(false); showMsg('success', 'Go-live reset applied!'); fetchAll()
   }
 
+  // Compensation columns that may not exist in all deployments.
+  // safeInsert / safeUpdate try the full payload then fall back to core-only if
+  // the DB returns a "column not found in schema cache" error.
+  const COMP_COLS = ['wage_type','wage_amount','has_company_vehicle','target_bonus_pct',
+    'bonus_share_pct','show_wage','show_range','show_target_bonus','show_bonus_share','has_executive_dashboard']
+
+  const stripComp = (obj) => Object.fromEntries(Object.entries(obj).filter(([k]) => !COMP_COLS.includes(k)))
+  const isSchemaErr = (e) => e?.message?.toLowerCase().includes('schema cache') || e?.message?.toLowerCase().includes('column')
+
   const addEmployee = async (e) => {
     e.preventDefault(); setLoading(true)
     const accrual = parseInt(form.daily_accrual) || 0
-    // Build payload with only core required fields first, then add optional fields
-    // conditionally to avoid "column not found in schema cache" errors
-    const payload = {
+    const core = {
       first_name: form.first_name.trim(), last_name: form.last_name.trim(),
       email: form.email.toLowerCase().trim(),
       password_hash: 'spark123', must_change_password: true,
@@ -584,26 +591,28 @@ export default function AdminPage() {
       is_management: form.is_management || MANAGEMENT_GRADES.includes(form.job_grade),
       has_spark_list: form.has_spark_list || false,
       is_optional: form.is_optional || false,
-      notify_email: form.notify_email !== false,
-      notify_sms: form.notify_sms || false,
+      notify_email: form.notify_email !== false, notify_sms: form.notify_sms || false,
+      job_grade: form.job_grade || null, job_title: form.job_title || null,
+      phone: form.phone?.trim() || null, carrier: form.carrier || null,
     }
-    // Optional fields — only set when non-empty to avoid schema-cache errors
-    if (form.phone?.trim())           payload.phone               = form.phone.trim()
-    if (form.carrier)                 payload.carrier             = form.carrier
-    if (form.job_grade)               payload.job_grade           = form.job_grade
-    if (form.job_title)               payload.job_title           = form.job_title
-    if (form.wage_type)               payload.wage_type           = form.wage_type
-    if (form.wage_amount !== '')    payload.wage_amount         = parseFloat(form.wage_amount) || 0
-    if (form.has_company_vehicle)     payload.has_company_vehicle = form.has_company_vehicle
-    if (form.target_bonus_pct !== '') payload.target_bonus_pct = parseFloat(form.target_bonus_pct) || 0
-    if (form.bonus_share_pct !== '')  payload.bonus_share_pct  = parseFloat(form.bonus_share_pct) || 0
-    if (form.has_executive_dashboard) payload.has_executive_dashboard = form.has_executive_dashboard
-    const { error } = await supabase.from('employees').insert(payload)
+    const full = { ...core,
+      wage_type: form.wage_type || 'hourly', wage_amount: parseFloat(form.wage_amount) || 0,
+      has_company_vehicle: form.has_company_vehicle || false,
+      target_bonus_pct: parseFloat(form.target_bonus_pct) || 0,
+      bonus_share_pct: parseFloat(form.bonus_share_pct) || 0,
+      has_executive_dashboard: form.has_executive_dashboard || false,
+    }
+    let { error } = await supabase.from('employees').insert(full)
+    if (error && isSchemaErr(error)) {
+      const r = await supabase.from('employees').insert(core)
+      error = r.error
+    }
     setLoading(false)
     if (error) { showMsg('error', error.message); return }
     showMsg('success', `${form.first_name} ${form.last_name} added!`)
     setForm(emptyForm); fetchAll()
   }
+
 
   const removeEmployee = async (emp) => {
     if (!window.confirm(`Remove ${emp.first_name} ${emp.last_name}? Cannot be undone.`)) return
@@ -658,32 +667,34 @@ export default function AdminPage() {
     setLoading(true)
     const oldV = editEmp.vested_sparks || 0, oldU = editEmp.unvested_sparks || 0
     const newV = parseInt(editValues.vested_sparks) || 0, newU = parseInt(editValues.unvested_sparks) || 0
-    await supabase.from('employees').update({
+    const newAccrual = parseInt(editValues.daily_accrual) || 0
+    const core = {
       first_name: editValues.first_name, last_name: editValues.last_name,
       email: editValues.email.toLowerCase(), phone: editValues.phone, carrier: editValues.carrier || '',
       vested_sparks: newV, unvested_sparks: newU,
-      daily_accrual: parseInt(editValues.daily_accrual) || 0,
-      // When accrual changes, also reset remaining to the new accrual value
-      // so the employee's My Sparks page reflects the change immediately.
-      daily_sparks_remaining: parseInt(editValues.daily_accrual) || 0,
+      daily_accrual: newAccrual,
+      // Reset remaining to match the new accrual so My Sparks reflects it immediately
+      daily_sparks_remaining: newAccrual,
       job_grade: editValues.job_grade, job_title: editValues.job_title,
       is_management: editValues.is_management || MANAGEMENT_GRADES.includes(editValues.job_grade),
       has_spark_list: editValues.has_spark_list,
       is_optional: editValues.is_optional || false,
       notify_email: editValues.notify_email, notify_sms: editValues.notify_sms,
-      // compensation
-      wage_type: editValues.wage_type || 'hourly',
-      wage_amount: parseFloat(editValues.wage_amount) || 0,
+      updated_at: new Date().toISOString()
+    }
+    const full = { ...core,
+      wage_type: editValues.wage_type || 'hourly', wage_amount: parseFloat(editValues.wage_amount) || 0,
       has_company_vehicle: editValues.has_company_vehicle || false,
       target_bonus_pct: parseFloat(editValues.target_bonus_pct) || 0,
       bonus_share_pct: parseFloat(editValues.bonus_share_pct) || 0,
-      show_wage: editValues.show_wage,
-      show_range: editValues.show_range,
-      show_target_bonus: editValues.show_target_bonus,
-      show_bonus_share: editValues.show_bonus_share,
+      show_wage: editValues.show_wage, show_range: editValues.show_range,
+      show_target_bonus: editValues.show_target_bonus, show_bonus_share: editValues.show_bonus_share,
       has_executive_dashboard: editValues.has_executive_dashboard || false,
-      updated_at: new Date().toISOString()
-    }).eq('id', editEmp.id)
+    }
+    let { error: updateErr } = await supabase.from('employees').update(full).eq('id', editEmp.id)
+    if (updateErr && isSchemaErr(updateErr)) {
+      await supabase.from('employees').update(core).eq('id', editEmp.id)
+    }
     const vd = newV - oldV, ud = newU - oldU
     if (vd !== 0 || ud !== 0) {
       await supabase.from('spark_transactions').insert({
@@ -694,6 +705,7 @@ export default function AdminPage() {
     }
     setLoading(false); setEditEmp(null); showMsg('success', 'Employee updated!'); fetchAll()
   }
+
 
   const processCashout = async () => {
     const n = parseInt(cashoutSparks)
