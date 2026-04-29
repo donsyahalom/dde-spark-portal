@@ -88,6 +88,7 @@ export default function CompensationPage() {
   const { currentUser } = useAuth()
   const [emp, setEmp] = useState(null)
   const [settings, setSettings] = useState({})
+  const [userPerms, setUserPerms] = useState(null)   // parsed user_permissions row
   const [gradeCompMap, setGradeCompMap] = useState({})   // job_grade -> comp row
   const [gradeRespMap, setGradeRespMap] = useState({})   // job_grade -> responsibilities text
   const [systemGrades, setSystemGrades] = useState([])
@@ -104,12 +105,14 @@ export default function CompensationPage() {
       { data: compRows },
       { data: respRows },
       { data: gradeListRows },
+      { data: permRow },
     ] = await Promise.all([
       supabase.from('employees').select('*').eq('id', currentUser.id).single(),
       supabase.from('settings').select('*'),
       supabase.from('perf_grade_compensation').select('*'),
       supabase.from('perf_grade_responsibilities').select('*'),
       supabase.from('custom_lists').select('value, sort_order').eq('list_type', 'job_grade').order('sort_order'),
+      supabase.from('user_permissions').select('permissions').eq('employee_id', currentUser.id).single(),
     ])
     if (empRow) setEmp(empRow)
     if (sData) {
@@ -122,12 +125,18 @@ export default function CompensationPage() {
       const m = {}; respRows.forEach(r => { m[r.job_grade] = r.responsibilities }); setGradeRespMap(m)
     }
     setSystemGrades((gradeListRows || []).map(r => r.value))
+    if (permRow) {
+      try { setUserPerms(JSON.parse(permRow.permissions)) } catch {}
+    }
     setLoading(false)
   }
 
-  // ── Resolve effective visibility (employee override → global) ─────────────
-  const resolveShow = (empField, settingKey) => {
-    if (emp && emp[empField] !== null && emp[empField] !== undefined) return emp[empField]
+  // ── Resolve effective visibility (user_permissions detail → global setting) ─
+  const resolveShow = (detailId, settingKey) => {
+    // Check the per-employee detail flag in user_permissions first
+    const perUserDetail = userPerms?.screens?.compensation?.details?.[detailId]
+    if (typeof perUserDetail === 'boolean') return perUserDetail
+    // Fall back to global setting
     return settings[settingKey] === 'true' || settings[settingKey] === true
   }
 

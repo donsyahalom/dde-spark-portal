@@ -11,13 +11,34 @@ export default function Layout() {
   const { currentUser, logout } = useAuth()
   const navigate = useNavigate()
   const [compensationEnabled, setCompensationEnabled] = useState(true)
+  const [userCanSeeCompensation, setUserCanSeeCompensation] = useState(true)
 
   useEffect(() => {
+    // Fetch global compensation_enabled setting
     supabase.from('settings').select('value').eq('key','compensation_enabled').single()
       .then(({ data }) => {
         if (data) setCompensationEnabled(data.value !== 'false')
       })
   }, [])
+
+  useEffect(() => {
+    // Fetch per-employee compensation tab permission from user_permissions
+    if (!currentUser?.id || currentUser?.is_admin) return
+    supabase
+      .from('user_permissions')
+      .select('permissions')
+      .eq('employee_id', currentUser.id)
+      .single()
+      .then(({ data }) => {
+        if (!data) return // No saved permissions = use global default
+        try {
+          const perms = JSON.parse(data.permissions)
+          const visible = perms?.screens?.compensation?.visible
+          // Only override if explicitly set (true or false); undefined = use global
+          if (typeof visible === 'boolean') setUserCanSeeCompensation(visible)
+        } catch {}
+      })
+  }, [currentUser?.id])
 
   const handleLogout = () => {
     logout()
@@ -61,7 +82,7 @@ export default function Layout() {
               ✨ My Sparks
             </NavLink>
           )}
-          {!currentUser?.is_admin && compensationEnabled && (
+          {!currentUser?.is_admin && compensationEnabled && userCanSeeCompensation && (
             <NavLink to="/compensation" className={({isActive}) => `nav-btn${isActive ? ' active' : ''}`}>
               💵 My Pay
             </NavLink>
