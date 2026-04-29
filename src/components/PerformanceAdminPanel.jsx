@@ -333,7 +333,6 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
       job_grade: editGradeResp.job_grade,
       responsibilities: gradeRespText,
       updated_at: new Date().toISOString(),
-      updated_by: currentUser.id,
     }, { onConflict: 'job_grade' })
     setGradeResponsibilities(prev => {
       const idx = prev.findIndex(r => r.job_grade === editGradeResp.job_grade)
@@ -356,7 +355,6 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
       target_bonus_pct: parseFloat(gradeCompValues.target_bonus_pct) || 0,
       bonus_share_pct: parseFloat(gradeCompValues.bonus_share_pct) || 0,
       updated_at: new Date().toISOString(),
-      updated_by: currentUser.id,
     }
     await supabase.from('perf_grade_compensation').upsert(payload, { onConflict: 'job_grade' })
     setGradeCompensation(prev => {
@@ -377,7 +375,6 @@ export default function PerformanceAdminPanel({ employees, showMsg }) {
       employee_id: editProfile.employee_id,
       responsibilities: profileText,
       updated_at: new Date().toISOString(),
-      updated_by: currentUser.id,
     }, { onConflict: 'employee_id' })
     setProfiles(prev => {
       const idx = prev.findIndex(p => p.employee_id === editProfile.employee_id)
