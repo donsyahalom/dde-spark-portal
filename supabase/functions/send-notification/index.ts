@@ -47,6 +47,13 @@ Deno.serve(async (req) => {
     }
 
     const result = await sendViaResend(resendKey, to, subject || 'DDE Spark Portal', html || '')
+    if (!result.ok && employeeId) {
+      await supa.from('notification_log').insert({
+        employee_id: employeeId, notification_type: 'test',
+        channel: channel || 'email', subject, success: false,
+        error_msg: JSON.stringify(result.data)
+      })
+    }
     return new Response(JSON.stringify({ ok: result.ok, data: result.data }), {
       headers: { ...cors, 'Content-Type': 'application/json' }
     })
@@ -60,7 +67,8 @@ async function sendViaResend(apiKey: string | undefined, to: string, subject: st
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: 'DDE SPARKS Portal <sparks@dubaldo.com>', to, subject, html })
+    body: JSON.stringify({ from: 'DDE SPARKS Portal <lena@dubaldo.com>', to, subject, html })
+   
   })
   const data = await res.json()
   return { ok: res.ok, data }
