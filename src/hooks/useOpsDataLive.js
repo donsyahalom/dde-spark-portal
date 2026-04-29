@@ -19,6 +19,17 @@
 // IMPORTANT: cross-schema queries use `supabase.schema('ops').from(...)`,
 // NOT `supabase.from('ops.tablename')`.  PostgREST treats the latter as
 // a literal table name and 404s.
+//
+// PC filtering note (2026-04-29):
+// The original mock-only filter assumed job numbers were short numeric
+// codes (e.g. "23-100") and split AR.job by space to recover the leading
+// num token.  Real DuBaldo Sage data uses multi-word short_names (e.g.
+// "Empire Industries"), so the split-by-space heuristic drops every row.
+// Today the underlying sage.* data is single-source-company (DuBaldo),
+// so PC subdivision (DDE / DCM / SILK) has no DB-side support yet — we
+// pass the full live result through unfiltered.  Add a real
+// profit_center column upstream and re-introduce server-side filtering
+// when that lands.
 
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
@@ -34,21 +45,6 @@ import {
   PURCHASE_ORDERS,
   WORK_ORDERS,
 } from '../lib/opsMockData'
-
-// Profit-center filter.  Today sage.* is a single-company scope so
-// every PC sees the same jobs; the filter is a client-side predicate on
-// the job number prefix ('SV-DDE-…', 'D…', 'S…') that matches the
-// convention used in the mock fixtures.  Swap to a server-side filter
-// once the data model learns about profit centers (probably a
-// sage.job_profit_center column populated via the cost-code prefix).
-function jobMatchesPc(job, pc) {
-  if (pc === 'COMBINED') return true
-  const n = String(job.num || '')
-  if (pc === 'DDE')  return n.startsWith('2') || n.startsWith('SV-DDE')
-  if (pc === 'DCM')  return n.startsWith('D') || n.startsWith('SV-DCM')
-  if (pc === 'SILK') return n.startsWith('S') && !n.startsWith('SV-DCM')
-  return true
-}
 
 async function fetchOpsSlices() {
   // Run the view queries in parallel.  Each returns { data, error };
@@ -110,11 +106,6 @@ export function useOpsDataLive() {
 
   const { jobs, arInvoices, apInvoices, payrollLines, lastSync } = state.live
 
-  // Filter jobs to the selected PC, then restrict invoice / payroll
-  // rows to jobs visible in that PC so each page shows a coherent slice.
-  const jobsForPc = jobs.filter((j) => jobMatchesPc(j, pc))
-  const jobNums   = new Set(jobsForPc.map((j) => j.num))
-
   // Same Cash-basis revenue clip we apply to mock PnL.  Once the live
   // P&L view lands, migrate this scaling inside the view.
   const pnl = PNL[pc]
@@ -129,6 +120,9 @@ export function useOpsDataLive() {
     net:      pnl.net.map((v) => Math.round(v * adjust)),
   }
 
+  // PC filter is intentionally a no-op today — see file header.  We pass
+  // every live row through and rely on the source-company filter at the
+  // DB level for scoping.
   return {
     loading: false,
     error:   null,
@@ -136,16 +130,16 @@ export function useOpsDataLive() {
     data: {
       kpis:            KPIS[pc],            // still mock
       pnl:             pnlScaled,           // still mock
-      jobs:            jobsForPc,           // LIVE
+      jobs:            jobs,                // LIVE — unfiltered
       cashflow:        CASHFLOW,            // still mock
-      arInvoices:      arInvoices.filter((i) => !i.job || jobNums.has((i.job || '').split(' ')[0])),
-      apInvoices,                           // LIVE (no PC filter)
+      arInvoices:      arInvoices,          // LIVE — unfiltered
+      apInvoices:      apInvoices,          // LIVE — unfiltered
       paymentHistory:  PAYMENT_HISTORY,     // still mock
       kpiSparks:       KPI_SPARKS,          // still mock
       permUsers:       PERM_USERS,          // still mock
-      payrollLines:    payrollLines.filter((p) => jobNums.has(p.job)),
-      purchaseOrders:  PURCHASE_ORDERS.filter((p) => jobNums.has(p.jobNum)),
-      workOrders:      WORK_ORDERS.filter((w) => jobNums.has(w.jobNum)),
+      payrollLines:    payrollLines,        // LIVE — unfiltered
+      purchaseOrders:  PURCHASE_ORDERS,     // still mock (no live source yet)
+      workOrders:      WORK_ORDERS,         // still mock (no live source yet)
       arEmailDefaults: AR_EMAIL_DEFAULTS,
     },
   }
