@@ -56,17 +56,22 @@ export default function OpsPermissionsPage() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const [empResult, { data: perms }] = await Promise.all([
-      supabase.from('employees').select('id,first_name,last_name,email,job_grade,has_executive_dashboard').eq('is_admin', false).order('last_name'),
+    const [{ data: perms }] = await Promise.all([
       supabase.from('ops_permissions').select('*').catch(() => ({ data: [] })),
     ])
-    // If has_executive_dashboard column missing from schema cache, fall back to
-    // ops_permissions table to determine who has exec access
-    let allEmps = empResult.data || []
-    if (empResult.error && empResult.error.message?.toLowerCase().includes('schema')) {
-      const { data: fallback } = await supabase.from('employees').select('id,first_name,last_name,email,job_grade').eq('is_admin', false).order('last_name')
-      allEmps = (fallback || []).map(e => ({ ...e, has_executive_dashboard: (perms||[]).some(p => p.employee_id === e.id) }))
-    }
+    // Always use ops_permissions as the source of truth for who has exec access.
+    // has_executive_dashboard may be missing from the schema cache in some deployments,
+    // so we join on ops_permissions instead of relying on that column.
+    const { data: empData } = await supabase
+      .from('employees')
+      .select('id,first_name,last_name,email,job_grade')
+      .eq('is_admin', false)
+      .order('last_name')
+    const permIds = new Set((perms || []).map(p => p.employee_id))
+    const allEmps = (empData || []).map(e => ({
+      ...e,
+      has_executive_dashboard: permIds.has(e.id),
+    }))
     setEmployees(allEmps)
     const withDash = allEmps.filter(e => e.has_executive_dashboard)
     setExecUsers(withDash)
@@ -131,14 +136,16 @@ export default function OpsPermissionsPage() {
 
   const addEmployee = async (empId) => {
     setSaving(true)
-    await supabase.from('employees').update({ has_executive_dashboard: true }).eq('id', empId)
+    // Insert ops_permissions row — this is the source of truth for exec access.
+    // We also try to set has_executive_dashboard but ignore schema errors.
     await supabase.from('ops_permissions').upsert({
       employee_id: empId, role: 'viewer', pcs: [],
       hidden_tabs: ALL_TABS.map(t => t.id),
       hidden_fields: ALL_FIELDS.map(f => f.id),
       job_access: 'assigned', job_access_list: [],
       updated_at: new Date().toISOString(),
-    }, { onConflict: 'employee_id' }).catch(() => {})
+    }, { onConflict: 'employee_id' })
+    await supabase.from('employees').update({ has_executive_dashboard: true }).eq('id', empId).catch(() => {})
     setSaving(false)
     setShowAddPicker(false); setAddSearch('')
     setSelected(empId)
@@ -149,17 +156,18 @@ export default function OpsPermissionsPage() {
   const removeEmployee = async (empId) => {
     const emp = execUsers.find(e => e.id === empId)
     if (!window.confirm(`Remove Executive Dashboard access for ${emp?.first_name} ${emp?.last_name}?`)) return
-    await supabase.from('employees').update({ has_executive_dashboard: false }).eq('id', empId)
-    await supabase.from('ops_permissions').delete().eq('employee_id', empId).catch(() => {})
+    await supabase.from('ops_permissions').delete().eq('employee_id', empId)
+    await supabase.from('employees').update({ has_executive_dashboard: false }).eq('id', empId).catch(() => {})
     if (selected === empId) setSelected(execUsers.filter(e => e.id !== empId)[0]?.id || '')
     showMsg('Access removed'); fetchAll()
   }
 
   const eligibleToAdd = employees.filter(e =>
-    !e.has_executive_dashboard &&
+    !permIds_set.has(e.id) &&
     `${e.first_name} ${e.last_name} ${e.job_grade || ''}`.toLowerCase().includes(addSearch.toLowerCase())
   )
 
+  const permIds_set = new Set(execUsers.map(e => e.id))
   const selectedEmp = execUsers.find(e => e.id === selected)
 
   return (
