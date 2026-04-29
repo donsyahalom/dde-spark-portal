@@ -19,28 +19,33 @@ import {
   computePayroll,
   jobProductivity,
 } from '../lib/opsMockData'
+import { useOpsDataLive } from './useOpsDataLive'
+
+// Feature flag — set VITE_USE_LIVE_DATA=true in Netlify env (Builds
+// scope) to drive the portal from the Sage->Supabase sync instead of
+// fixtures.  Any failure in the live path (query error, ops.* views
+// not yet created, schema not exposed in Supabase API settings, empty
+// tables because the first sync hasn't run) falls back to fixtures so
+// the UI is always renderable during the rollout.
+const USE_LIVE = String(import.meta.env.VITE_USE_LIVE_DATA || '').toLowerCase() === 'true'
 
 // Single hook that returns all the slices the ops pages need for the
-// current profit-center / basis view.  When Supabase is wired, swap the
-// fixture reads below for `ops.*` view queries — the return shape stays
-// stable.
-//
-// Notes on the new data:
-//   • `jobs` now carries split direct-cost buckets (labor/material/subs/
-//     equipment/bonds/permits/other) plus type (contract|service),
-//     retainage + release schedule, and labor-hour inputs for
-//     productivity.  Back-compat aliases `lab/mat/sub` are preserved so
-//     older table code keeps working while pages are migrated.
-//   • `purchaseOrders` is filtered to the current PC's job list so the
-//     Jobs P&L expanded row + commits roll-up show only relevant POs.
-//   • `workOrders` is filtered similarly and drives the service-jobs
-//     detail view on the Jobs page.
-//   • `arEmailDefaults` seeds the weekly A/R email settings panel; the
-//     user-saved overrides live in localStorage until Supabase wires.
+// current profit-center / basis view.  When USE_LIVE is on and the
+// live query has resolved, we return its data; otherwise we serve
+// fixtures so pages always render.
 export function useOpsData() {
   const { pc, basis } = useOpsViewState()
 
+  // Always call the live hook (hooks must be called unconditionally).
+  // It no-ops cheaply when the flag is off — the internal effect only
+  // fires once and the error state is the signal we use to fall back.
+  const live = useOpsDataLive()
+
   return useMemo(() => {
+    if (USE_LIVE && live.data) {
+      return live.data
+    }
+    // Fixture path — unchanged behaviour.
     const pnl = PNL[pc]
     // Cash basis just clips revenue slightly to fake cash-timing lag —
     // same as the mockup.  Keeping the shape parallel to Accrual means
@@ -79,7 +84,7 @@ export function useOpsData() {
       workOrders,
       arEmailDefaults: AR_EMAIL_DEFAULTS,
     }
-  }, [pc, basis])
+  }, [pc, basis, live.data])
 }
 
 export { buildWeekly, companyProductivity, computePayroll, jobProductivity }
