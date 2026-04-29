@@ -668,13 +668,19 @@ export default function AdminPage() {
     const oldV = editEmp.vested_sparks || 0, oldU = editEmp.unvested_sparks || 0
     const newV = parseInt(editValues.vested_sparks) || 0, newU = parseInt(editValues.unvested_sparks) || 0
     const newAccrual = parseInt(editValues.daily_accrual) || 0
+    // Preserve how many sparks the employee has already used this period.
+    // used = old accrual - old remaining (can't go negative).
+    // New remaining = new accrual - already used, floored at 0.
+    const oldAccrual = editEmp.daily_accrual || 0
+    const oldRemaining = editEmp.daily_sparks_remaining || 0
+    const alreadyUsed = Math.max(0, oldAccrual - oldRemaining)
+    const newRemaining = Math.max(0, newAccrual - alreadyUsed)
     const core = {
       first_name: editValues.first_name, last_name: editValues.last_name,
       email: editValues.email.toLowerCase(), phone: editValues.phone, carrier: editValues.carrier || '',
       vested_sparks: newV, unvested_sparks: newU,
       daily_accrual: newAccrual,
-      // Reset remaining to match the new accrual so My Sparks reflects it immediately
-      daily_sparks_remaining: newAccrual,
+      daily_sparks_remaining: newRemaining,
       job_grade: editValues.job_grade, job_title: editValues.job_title,
       is_management: editValues.is_management || MANAGEMENT_GRADES.includes(editValues.job_grade),
       has_spark_list: editValues.has_spark_list,
