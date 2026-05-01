@@ -194,8 +194,12 @@ function ColumnHeader({ col, sortKey, sortDir, onSort }) {
     <th
       onClick={() => onSort(col.key)}
       className={col.align === 'right' ? 'right' : ''}
-      style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
-        background: active ? 'rgba(240,192,64,0.08)' : undefined }}
+      style={{
+        cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
+        position: 'sticky', top: 0, zIndex: col.key === 'name' ? 4 : 3,
+        background: active ? 'rgba(30,34,42,0.98)' : 'rgba(18,22,28,0.98)',
+        left: col.key === 'name' ? 28 : undefined,
+      }}
       title={col.tooltip || ''}
     >
       {col.label}
@@ -428,10 +432,184 @@ function AdminControls({ job, currentType, onReclassify, onClose, isAdmin }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Job grouping panel — shown in expanded row
+// Lets admin link separate Sage jobs under one display name.
+// Groups stored in localStorage as { [groupLabel]: [jobNum, ...] }
+// ─────────────────────────────────────────────────────────────────────
+function JobGroupPanel({ job, allJobs, groups, onGroupsChange }) {
+  const [search, setSearch]     = useState('')
+  const [newLabel, setNewLabel] = useState('')
+  const [open, setOpen]         = useState(false)
+
+  // Find which group this job belongs to (if any)
+  const myJobNum    = String(job.jobNum || job._primaryNum || job.num)
+  const myGroup     = Object.entries(groups).find(([, nums]) => nums.map(String).includes(myJobNum))
+  const myGroupLabel = myGroup?.[0] || null
+  const myGroupNums  = myGroup?.[1] || []
+
+  const searchResults = useMemo(() => {
+    if (!search.trim()) return []
+    const needle = search.toLowerCase()
+    return allJobs
+      .filter((j) => {
+        const jn = String(j.jobNum || j.num)
+        if (jn === myJobNum) return false
+        return j.name.toLowerCase().includes(needle) || jn.includes(needle)
+      })
+      .slice(0, 8)
+  }, [search, allJobs, myJobNum])
+
+  const addToGroup = (targetJobNum) => {
+    const label = myGroupLabel || newLabel.trim() || job.name
+    const existing = groups[label] || []
+    const updated = { ...groups, [label]: [...new Set([...existing, myJobNum, String(targetJobNum)])] }
+    onGroupsChange(updated)
+    setSearch('')
+  }
+
+  const removeFromGroup = (numToRemove) => {
+    if (!myGroupLabel) return
+    const updated = { ...groups }
+    const remaining = updated[myGroupLabel].filter((n) => String(n) !== String(numToRemove))
+    if (remaining.length <= 1) delete updated[myGroupLabel]
+    else updated[myGroupLabel] = remaining
+    onGroupsChange(updated)
+  }
+
+  const dissolveGroup = () => {
+    if (!myGroupLabel) return
+    const updated = { ...groups }
+    delete updated[myGroupLabel]
+    onGroupsChange(updated)
+  }
+
+  return (
+    <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(111,168,255,0.05)',
+      border: '1px solid rgba(111,168,255,0.18)', borderRadius: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <span className="ops-small" style={{ color: PALETTE.blue, fontWeight: 700 }}>
+          ⊕ Job Grouping
+        </span>
+        <button
+          className="ops-btn ghost"
+          style={{ padding: '2px 8px', fontSize: '0.72rem' }}
+          onClick={() => setOpen((o) => !o)}
+        >{open ? '▲ collapse' : '▼ expand'}</button>
+      </div>
+
+      {myGroupLabel && (
+        <div className="ops-small" style={{ marginBottom: open ? 8 : 0 }}>
+          <span className="ops-text-dim">Grouped as: </span>
+          <span style={{ color: PALETTE.blue, fontWeight: 600 }}>{myGroupLabel}</span>
+          <span className="ops-text-dim"> — {myGroupNums.length} jobs: {myGroupNums.join(', ')}</span>
+          {open && (
+            <button
+              className="ops-btn ghost"
+              style={{ marginLeft: 10, padding: '2px 8px', fontSize: '0.72rem', color: 'var(--neg)', borderColor: 'rgba(255,90,90,0.3)' }}
+              onClick={(e) => { e.stopPropagation(); dissolveGroup() }}
+            >✕ dissolve group</button>
+          )}
+        </div>
+      )}
+
+      {open && (
+        <>
+          {/* Current group members */}
+          {myGroupLabel && myGroupNums.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <div className="ops-small ops-text-dim" style={{ marginBottom: 4 }}>Members:</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {myGroupNums.map((n) => {
+                  const memberJob = allJobs.find((j) => String(j.jobNum || j.num) === String(n))
+                  const isMe = String(n) === myJobNum
+                  return (
+                    <span key={n} style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      padding: '2px 8px', borderRadius: 12, fontSize: '0.75rem',
+                      background: isMe ? 'rgba(111,168,255,0.2)' : 'rgba(255,255,255,0.07)',
+                      border: `1px solid ${isMe ? 'rgba(111,168,255,0.4)' : 'rgba(255,255,255,0.15)'}`,
+                      color: isMe ? PALETTE.blue : 'var(--white)',
+                    }}>
+                      {n} {memberJob ? `· ${memberJob.name}` : ''}
+                      {!isMe && (
+                        <button
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.4)', padding: 0, fontSize: '0.7rem', lineHeight: 1 }}
+                          onClick={(e) => { e.stopPropagation(); removeFromGroup(n) }}
+                          title="Remove from group"
+                        >✕</button>
+                      )}
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Group label input (only when not yet grouped) */}
+          {!myGroupLabel && (
+            <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className="ops-small ops-text-dim">Group label:</span>
+              <input
+                className="ops-input"
+                value={newLabel}
+                onChange={(e) => setNewLabel(e.target.value)}
+                placeholder={job.name}
+                style={{ width: 200, fontSize: '0.8rem', padding: '3px 8px' }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+          )}
+
+          {/* Search to add jobs */}
+          <div style={{ position: 'relative' }}>
+            <input
+              className="ops-input"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search jobs to link…"
+              style={{ width: '100%', fontSize: '0.8rem', padding: '4px 8px' }}
+              onClick={(e) => e.stopPropagation()}
+            />
+            {searchResults.length > 0 && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+                background: '#16191f', border: '1px solid rgba(111,168,255,0.3)',
+                borderRadius: 6, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+              }}>
+                {searchResults.map((j) => (
+                  <button
+                    key={j.jobNum || j.num}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left',
+                      padding: '7px 12px', background: 'none', border: 'none',
+                      borderBottom: '1px solid rgba(255,255,255,0.06)',
+                      cursor: 'pointer', color: 'var(--white)', fontSize: '0.82rem',
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.background = 'rgba(111,168,255,0.1)'}
+                    onMouseOut={(e) => e.currentTarget.style.background = 'none'}
+                    onClick={(e) => { e.stopPropagation(); addToGroup(j.jobNum || j.num) }}
+                  >
+                    <span style={{ color: PALETTE.blue, fontWeight: 600, marginRight: 8 }}>{j.jobNum || j.num}</span>
+                    {j.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="ops-small ops-text-dim" style={{ marginTop: 6 }}>
+            Groups merge financials and appear as one row. Stored locally — does not change Sage data.
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Contract job row  — all hooks BEFORE any conditional return
 // ─────────────────────────────────────────────────────────────────────
 function ContractJobRow({ job, purchaseOrders, workOrders, expanded, onToggle,
-                          fmtCell, columns, mode, onReclassify, onClose, isAdmin }) {
+                          fmtCell, columns, mode, onReclassify, onClose, isAdmin, allJobs, jobGroups, onGroupsChange }) {
   // ── ALL hooks unconditionally ──────────────────────────────────────
   const costTot  = job.directCost || 0
   const weekly   = useMemo(() => buildWeekly(job.revenue || 0, costTot), [job.revenue, costTot])
@@ -491,11 +669,19 @@ function ContractJobRow({ job, purchaseOrders, workOrders, expanded, onToggle,
   return (
     <>
       <tr className="clickable" onClick={onToggle}>
-        <td className="ops-text-dim ops-small" style={{ width: 28, textAlign: 'center' }}>{expanded ? '▾' : '▸'}</td>
+        <td className="ops-text-dim ops-small" style={{ width: 28, textAlign: 'center', position: 'sticky', left: 0, zIndex: 2, background: 'var(--bg-card)' }}>{expanded ? '▾' : '▸'}</td>
         {columns.map((c) => {
           if (c.key === 'directCost') return <DirectCostCell key="dc" job={job} workOrders={workOrders} isService={false} />
+          const isName = c.key === 'name'
           return (
-            <td key={c.key} className={c.align === 'right' ? 'right' : ''} style={{ whiteSpace: 'nowrap' }}>
+            <td key={c.key} className={c.align === 'right' ? 'right' : ''} style={{
+              whiteSpace: isName ? 'normal' : 'nowrap',
+              position: isName ? 'sticky' : undefined,
+              left: isName ? 28 : undefined,
+              zIndex: isName ? 2 : undefined,
+              background: isName ? 'var(--bg-card)' : undefined,
+              maxWidth: isName ? 260 : undefined,
+            }}>
               {c.key === 'status' ? <span className={`chip ${chipCls}`}>{job.status}</span> : fmtCell(job, c)}
             </td>
           )
@@ -521,6 +707,8 @@ function ContractJobRow({ job, purchaseOrders, workOrders, expanded, onToggle,
                   </div>
                 )}
                 <AdminControls job={job} currentType={job.type} onReclassify={onReclassify} onClose={onClose} isAdmin={isAdmin} />
+              {isAdmin && <JobGroupPanel job={job} allJobs={allJobs || []} groups={jobGroups || {}} onGroupsChange={onGroupsChange} />}
+                {isAdmin && <JobGroupPanel job={job} allJobs={allJobs || []} groups={jobGroups || {}} onGroupsChange={onGroupsChange} />}
               </div>
               <div className="ops-small ops-text-dim" style={{ textAlign: 'right' }}>
                 <div>Budget: {(job.budgetLaborHrs || 0).toLocaleString()} hrs · Actual: {(job.actualLaborHrs || 0).toLocaleString()} hrs</div>
@@ -642,7 +830,7 @@ function ContractJobRow({ job, purchaseOrders, workOrders, expanded, onToggle,
 // ─────────────────────────────────────────────────────────────────────
 // Service job row  — no hooks needed (no charts)
 // ─────────────────────────────────────────────────────────────────────
-function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, onReclassify, onClose, isAdmin }) {
+function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, onReclassify, onClose, isAdmin, allJobs, jobGroups, onGroupsChange }) {
   const chipCls = job.status === 'Closed' ? 'closed' : ['Hold','Bid','Contract'].includes(job.status) ? 'hold' : job.status === 'Complete' ? 'closed' : 'active'
   const dates   = jobDates(job)
 
@@ -656,11 +844,19 @@ function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, 
   return (
     <>
       <tr className="clickable" onClick={onToggle}>
-        <td className="ops-text-dim ops-small" style={{ width: 28, textAlign: 'center' }}>{expanded ? '▾' : '▸'}</td>
+        <td className="ops-text-dim ops-small" style={{ width: 28, textAlign: 'center', position: 'sticky', left: 0, zIndex: 2, background: 'var(--bg-card)' }}>{expanded ? '▾' : '▸'}</td>
         {columns.map((c) => {
           if (c.key === 'directCost') return <DirectCostCell key="dc" job={job} workOrders={workOrders} isService />
+          const isName = c.key === 'name'
           return (
-            <td key={c.key} className={c.align === 'right' ? 'right' : ''} style={{ whiteSpace: 'nowrap' }}>
+            <td key={c.key} className={c.align === 'right' ? 'right' : ''} style={{
+              whiteSpace: isName ? 'normal' : 'nowrap',
+              position: isName ? 'sticky' : undefined,
+              left: isName ? 28 : undefined,
+              zIndex: isName ? 2 : undefined,
+              background: isName ? 'var(--bg-card)' : undefined,
+              maxWidth: isName ? 260 : undefined,
+            }}>
               {c.key === 'status' ? <span className={`chip ${chipCls}`}>{job.status}</span> : fmtCell(job, c)}
             </td>
           )
@@ -678,6 +874,7 @@ function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, 
                 </div>
               )}
               <AdminControls job={job} currentType={job.type} onReclassify={onReclassify} onClose={onClose} isAdmin={isAdmin} />
+              {isAdmin && <JobGroupPanel job={job} allJobs={allJobs || []} groups={jobGroups || {}} onGroupsChange={onGroupsChange} />}
             </div>
             {allWos.length === 0
               ? <div className="ops-small ops-text-dim">No work orders on file.</div>
@@ -734,10 +931,18 @@ export default function OpsJobsPage() {
   const [dateFilterOn, setDateFilterOn] = useState(false)
 
   // Status overrides (Close / Reopen) — stored locally like type overrides
-  const LS_STATUS = 'dde.ops.jobStatusOverrides'
+  const LS_STATUS  = 'dde.ops.jobStatusOverrides'
+  const LS_GROUPS  = 'dde.ops.jobGroups'
   const [statusOverrides, setStatusOverrides] = useState(() => {
     try { return JSON.parse(localStorage.getItem(LS_STATUS) || '{}') } catch { return {} }
   })
+  const [jobGroups, setJobGroupsRaw] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(LS_GROUPS) || '{}') } catch { return {} }
+  })
+  const setJobGroups = (g) => {
+    setJobGroupsRaw(g)
+    try { localStorage.setItem(LS_GROUPS, JSON.stringify(g)) } catch {}
+  }
 
   const handleClose = useCallback((num, newStatus) => {
     setStatusOverrides((prev) => {
@@ -799,9 +1004,20 @@ export default function OpsJobsPage() {
 
   // 6. Table rows pipeline: source → text/status filter → group → sort
   const rows = useMemo(() => {
+    // Apply job groups: override the name of grouped jobs so groupByName
+    // naturally merges them under the group label.
+    const groupByJobNum = {}
+    for (const [label, nums] of Object.entries(jobGroups)) {
+      for (const n of nums) groupByJobNum[String(n)] = label
+    }
+    const applyGroups = (jobs) => jobs.map((j) => {
+      const jn = String(j.jobNum || j.num)
+      return groupByJobNum[jn] ? { ...j, name: groupByJobNum[jn], _manualGroup: groupByJobNum[jn] } : j
+    })
+
     const source = view === 'contract'
-      ? contractJobs.map((j) => ({ ...j, productivity: jobProductivity(j).productivity }))
-      : serviceRows
+      ? applyGroups(contractJobs.map((j) => ({ ...j, productivity: jobProductivity(j).productivity })))
+      : applyGroups(serviceRows)
 
     // Text search
     let filtered = q.trim()
@@ -1066,7 +1282,7 @@ export default function OpsJobsPage() {
           }}>
             <thead>
               <tr>
-                <th style={{ width: 28 }} />
+                <th style={{ width: 28, position: 'sticky', top: 0, left: 0, zIndex: 4, background: 'rgba(18,22,28,0.98)' }} />
                 {columns.map((c) => (
                   <ColumnHeader key={c.key} col={c} sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 ))}
@@ -1089,6 +1305,9 @@ export default function OpsJobsPage() {
                     onReclassify={setJobTypeOverride}
                     onClose={handleClose}
                     isAdmin={isAdmin}
+                    allJobs={effectiveJobs}
+                    jobGroups={jobGroups}
+                    onGroupsChange={setJobGroups}
                   />
                 ) : (
                   <ServiceJobRow
@@ -1102,6 +1321,9 @@ export default function OpsJobsPage() {
                     onReclassify={setJobTypeOverride}
                     onClose={handleClose}
                     isAdmin={isAdmin}
+                    allJobs={effectiveJobs}
+                    jobGroups={jobGroups}
+                    onGroupsChange={setJobGroups}
                   />
                 )
               })}
