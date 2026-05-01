@@ -95,11 +95,14 @@ function safePct(v) {
 
 function runSum(arr) { let s = 0; return arr.map((v) => (s += v)) }
 
-// Job start/end from live fields or fallback map
+// Job date range for filter purposes.
+// Priority: use Sage's actual/scheduled dates when available.
+// Falls back to contractDate (always populated when a contract is awarded).
+// Falls back to UAT fixture dates for mock data.
 function jobDates(job) {
-  if (job.startDate || job.completeDate) {
-    return { start: job.startDate, end: job.completeDate }
-  }
+  const start = job.startDate || job.contractDate || null
+  const end   = job.completeDate || null
+  if (start) return { start, end }
   return JOB_DATES_FALLBACK[job._primaryNum || job.num] || null
 }
 
@@ -123,14 +126,20 @@ function serviceProductivity(serviceJobs, workOrders) {
 // ─────────────────────────────────────────────────────────────────────
 function applyDateFilter(jobs, dateFrom, dateTo) {
   let totalWithDates = 0
+  let totalWithoutDates = 0
   const filtered = jobs.filter((j) => {
     const d = jobDates(j)
-    if (!d || !d.start) return true  // no date data → pass through (don't hide)
+    if (!d || !d.start) {
+      totalWithoutDates++
+      return false  // no date data → exclude when filter is active
+    }
     totalWithDates++
-    const jobEnd = d.end || '9999-12-31'
-    return jobEnd >= dateFrom && d.start <= dateTo
+    // Overlap check: job overlaps filter window if
+    //   job starts before window ends AND job ends after window starts
+    const jobEnd = d.end || '9999-12-31'  // no end = ongoing
+    return d.start <= dateTo && jobEnd >= dateFrom
   })
-  return { filtered, totalWithDates }
+  return { filtered, totalWithDates, totalWithoutDates }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -732,19 +741,20 @@ export default function OpsJobsPage() {
   const allServiceJobs  = useMemo(() => effectiveJobs.filter((j) => j.type === 'service'),  [effectiveJobs])
 
   // 3. Apply date filter (affects cards too when on)
-  const { filtered: contractJobs, totalWithDates: contractDatesAvail } = useMemo(() =>
+  const { filtered: contractJobs, totalWithDates: contractDatesAvail, totalWithoutDates: contractNoDates = 0 } = useMemo(() =>
     dateFilterOn
       ? applyDateFilter(allContractJobs, dateFrom, dateTo)
-      : { filtered: allContractJobs, totalWithDates: allContractJobs.filter((j) => jobDates(j)?.start).length },
+      : { filtered: allContractJobs, totalWithDates: allContractJobs.filter((j) => jobDates(j)?.start).length, totalWithoutDates: 0 },
     [allContractJobs, dateFilterOn, dateFrom, dateTo],
   )
-  const { filtered: serviceJobs, totalWithDates: serviceDatesAvail } = useMemo(() =>
+  const { filtered: serviceJobs, totalWithDates: serviceDatesAvail, totalWithoutDates: serviceNoDates = 0 } = useMemo(() =>
     dateFilterOn
       ? applyDateFilter(allServiceJobs, dateFrom, dateTo)
-      : { filtered: allServiceJobs, totalWithDates: allServiceJobs.filter((j) => jobDates(j)?.start).length },
+      : { filtered: allServiceJobs, totalWithDates: allServiceJobs.filter((j) => jobDates(j)?.start).length, totalWithoutDates: 0 },
     [allServiceJobs, dateFilterOn, dateFrom, dateTo],
   )
   const datesAvailable = contractDatesAvail + serviceDatesAvail
+  const noDatesCount   = contractNoDates + serviceNoDates
 
   // 4. Card metrics (from date-filtered job lists)
   const contractProd = useMemo(() => companyProductivity(contractJobs), [contractJobs])
@@ -840,9 +850,14 @@ export default function OpsJobsPage() {
           </button>
           <span className="ops-small ops-text-dim">
             {contractJobs.length} contract · {serviceJobs.length} service in range
-            {datesAvailable === 0 && (
+            {noDatesCount > 0 && datesAvailable > 0 && (
               <span style={{ color: 'var(--gold)', marginLeft: 8 }}>
-                ⚠ No start/end dates on live jobs yet — re-run ops_views.sql in Supabase to enable
+                · {noDatesCount} job{noDatesCount !== 1 ? 's' : ''} excluded (no date data)
+              </span>
+            )}
+            {datesAvailable === 0 && (
+              <span style={{ color: 'var(--neg)', marginLeft: 8 }}>
+                ⚠ No date data on live jobs — re-run ops_views.sql in Supabase
               </span>
             )}
           </span>
@@ -952,9 +967,9 @@ export default function OpsJobsPage() {
           </div>
         }
       >
-        {/* ops-table-scroll-wrap overrides .ops-table width:100% → width:max-content
-             so columns never squish and the div scrolls horizontally when needed */}
-        <div className="ops-table-scroll-wrap">
+        {/* Negative margins escape the card body's 20px padding so the scroll
+             region is the full card width — no columns clipped at the edges */}
+        <div className="ops-table-scroll-wrap" style={{ marginLeft: -20, marginRight: -20, paddingLeft: 20, paddingRight: 20 }}>
           <table className="ops-table">
             <thead>
               <tr>
