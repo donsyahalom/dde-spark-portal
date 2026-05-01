@@ -100,6 +100,10 @@ function enrichJob(j) {
     actualLaborHrs:     num(j.actualLaborHrs),
     // Date fields from ops.jobs view (sage.jobs columns passed through).
     // Prefer actual dates when available, fall back to scheduled.
+    // Use the most reliable date that's actually populated in Sage:
+    // contractDate (ctcdte) is set when a contract is awarded — almost always filled.
+    // start/complete dates are manual PM fields — often blank.
+    contractDate:       j.contractDate || null,
     startDate:          j.actualStartDate || j.startDate || null,
     completeDate:       j.actualCompleteDate || j.completeDate || null,
   }
