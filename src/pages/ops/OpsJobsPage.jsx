@@ -353,7 +353,6 @@ function AdminControls({ job, currentType, onReclassify, onClose, isAdmin }) {
   if (!isAdmin) return null
   const target = currentType === 'contract' ? 'service' : 'contract'
   const isOverridden = !!job._typeOverridden
-  const isClosed = job.status === 'Closed'
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap',
@@ -396,19 +395,34 @@ function AdminControls({ job, currentType, onReclassify, onClose, isAdmin }) {
       {/* Divider */}
       <span style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.15)', margin: '0 4px' }} />
 
-      {/* Close / Reopen */}
-      <button
-        className="ops-btn ghost"
-        style={{
-          padding: '3px 10px', fontSize: '0.78rem',
-          color: isClosed ? 'var(--pos)' : 'var(--neg)',
-          borderColor: isClosed ? 'rgba(72,212,100,0.4)' : 'rgba(255,90,90,0.4)',
-        }}
-        onClick={(e) => { e.stopPropagation(); onClose(job._primaryNum || job.num, isClosed ? 'Active' : 'Closed') }}
-        title={isClosed ? 'Mark this job as Active (reopen)' : 'Mark this job as Closed — stored locally, syncs on next Sage push'}
-      >
-        {isClosed ? '↑ Reopen job' : '✕ Mark as Closed'}
-      </button>
+      {/* Status override selector */}
+      <span className="ops-small ops-text-dim">Set status:</span>
+      {['Bid','Contract','Active','Complete','Closed'].map((s) => {
+        const isCurrent = job.status === s
+        const col = s === 'Active' ? 'var(--pos)' : s === 'Closed' ? 'rgba(255,255,255,0.4)' : s === 'Complete' ? 'rgba(255,255,255,0.55)' : 'var(--gold)'
+        return (
+          <button
+            key={s}
+            className="ops-btn ghost"
+            style={{
+              padding: '3px 9px', fontSize: '0.75rem', fontWeight: isCurrent ? 700 : 400,
+              color: isCurrent ? col : 'rgba(255,255,255,0.4)',
+              borderColor: isCurrent ? col : 'rgba(255,255,255,0.15)',
+              background: isCurrent ? `${col}18` : 'transparent',
+            }}
+            onClick={(e) => { e.stopPropagation(); onClose(job._primaryNum || job.num, s) }}
+            title={`Mark as ${s}`}
+          >{s}</button>
+        )
+      })}
+      {job._statusOverridden && (
+        <button
+          className="ops-btn ghost"
+          style={{ padding: '3px 8px', fontSize: '0.72rem', opacity: 0.55 }}
+          onClick={(e) => { e.stopPropagation(); onClose(job._primaryNum || job.num, null) }}
+          title="Restore Sage status"
+        >↺ Reset</button>
+      )}
     </div>
   )
 }
@@ -501,8 +515,10 @@ function ContractJobRow({ job, purchaseOrders, workOrders, expanded, onToggle,
                   )}
                   {!job.firstInvDate && dates && <> · {dates.start} → {dates.end || 'ongoing'}</>}
                 </div>
-                {job._allNums?.length > 1 && (
-                  <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>Job numbers: {job._allNums.join(', ')}</div>
+                {job._allNums?.length > 0 && (
+                  <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>
+                    Job #: {job._allNums.join(', ')}
+                  </div>
                 )}
                 <AdminControls job={job} currentType={job.type} onReclassify={onReclassify} onClose={onClose} isAdmin={isAdmin} />
               </div>
@@ -656,8 +672,10 @@ function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, 
             <div style={{ marginBottom: 10 }}>
               <div style={{ fontWeight: 700, color: 'var(--white)' }}>{job.name} · work orders</div>
               {dates && <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>{dates.start} → {dates.end || 'ongoing'}</div>}
-              {job._allNums?.length > 1 && (
-                <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>Job numbers: {job._allNums.join(', ')}</div>
+              {job._allNums?.length > 0 && (
+                <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>
+                  Job #: {job._allNums.join(', ')}
+                </div>
               )}
               <AdminControls job={job} currentType={job.type} onReclassify={onReclassify} onClose={onClose} isAdmin={isAdmin} />
             </div>
@@ -703,7 +721,7 @@ export default function OpsJobsPage() {
   // ── UI state ────────────────────────────────────────────────────────
   const [view, setView]         = useState('contract')
   const [q, setQ]               = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState([])   // empty = show all
   const [sortKey, setSortKey]   = useState('revenue')
   const [sortDir, setSortDir]   = useState('desc')
   const [expanded, setExpanded] = useState(null)  // stores name-key, not num
@@ -723,7 +741,9 @@ export default function OpsJobsPage() {
 
   const handleClose = useCallback((num, newStatus) => {
     setStatusOverrides((prev) => {
-      const next = { ...prev, [num]: newStatus }
+      const next = { ...prev }
+      if (newStatus === null) delete next[num]  // null = reset to Sage value
+      else next[num] = newStatus
       try { localStorage.setItem(LS_STATUS, JSON.stringify(next)) } catch {}
       return next
     })
@@ -736,7 +756,7 @@ export default function OpsJobsPage() {
   // 1. Apply type overrides
   const effectiveJobs = useMemo(() =>
     applyJobTypeOverrides(jobs).map((j) =>
-      statusOverrides[j.num] ? { ...j, status: statusOverrides[j.num] } : j
+      statusOverrides[j.num] ? { ...j, status: statusOverrides[j.num], _statusOverridden: true } : j
     ),
     [jobs, applyJobTypeOverrides, statusOverrides],
   )
@@ -789,7 +809,7 @@ export default function OpsJobsPage() {
       : source.slice()
 
     // Status filter
-    if (statusFilter !== 'all') filtered = filtered.filter((j) => j.status === statusFilter)
+    if (statusFilter.length > 0) filtered = filtered.filter((j) => statusFilter.includes(j.status))
 
     // Group by name
     const grouped = groupByName(filtered)
@@ -973,21 +993,77 @@ export default function OpsJobsPage() {
             )}
             <input className="ops-input" value={q} onChange={(e) => setQ(e.target.value)}
               placeholder="Search name or customer" style={{ width: 200 }} />
-            <select className="ops-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="all">All statuses</option>
-              <option value="Active">Active</option>
-              <option value="Complete">Complete</option>
-              <option value="Contract">Contract</option>
-              <option value="Bid">Bid</option>
-              <option value="Closed">Closed</option>
-            </select>
+            {/* Multi-select status pills */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+              {['Active','Complete','Contract','Bid','Closed'].map((s) => {
+                const active = statusFilter.includes(s)
+                const chipColor = s === 'Active' ? 'var(--pos)' : s === 'Closed' ? 'rgba(255,255,255,0.4)' : s === 'Complete' ? 'rgba(255,255,255,0.55)' : 'var(--gold)'
+                return (
+                  <button
+                    key={s}
+                    onClick={() => setStatusFilter((prev) =>
+                      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
+                    )}
+                    style={{
+                      padding: '3px 10px', borderRadius: 20, fontSize: '0.75rem', fontWeight: 600,
+                      cursor: 'pointer', border: `1px solid ${active ? chipColor : 'rgba(255,255,255,0.2)'}`,
+                      background: active ? `${chipColor}22` : 'transparent',
+                      color: active ? chipColor : 'rgba(255,255,255,0.4)',
+                      transition: 'all 0.15s',
+                    }}
+                  >{s}</button>
+                )
+              })}
+              {statusFilter.length > 0 && (
+                <button
+                  onClick={() => setStatusFilter([])}
+                  style={{ padding: '3px 8px', borderRadius: 20, fontSize: '0.72rem', cursor: 'pointer',
+                    border: '1px solid rgba(255,255,255,0.15)', background: 'transparent',
+                    color: 'rgba(255,255,255,0.35)' }}
+                >✕ clear</button>
+              )}
+            </div>
           </div>
         }
       >
-        {/* Negative margins escape the card body's 20px padding so the scroll
-             region is the full card width — no columns clipped at the edges */}
-        <div className="ops-table-scroll-wrap" style={{ marginLeft: -20, marginRight: -20, paddingLeft: 20, paddingRight: 20 }}>
-          <table className="ops-table">
+        {/* Dual scrollbar — top mirror + bottom. Both divs are kept in sync
+             via the scrollRef so the user can scroll from either bar. */}
+        {(() => {
+          // We render the scroll wrapper via an IIFE so we can use a ref
+          // declared inline. The actual ref is on the outer component via
+          // useCallback but we keep it simple with a data-attribute approach.
+          return null
+        })()}
+        <div
+          id="jobs-top-scroll"
+          style={{ overflowX: 'auto', marginLeft: -20, marginRight: -20,
+            paddingLeft: 20, paddingRight: 20, height: 16, marginBottom: 2 }}
+          onScroll={(e) => {
+            const main = document.getElementById('jobs-main-scroll')
+            if (main) main.scrollLeft = e.target.scrollLeft
+          }}
+        >
+          <div id="jobs-top-scroll-inner" style={{ height: 1 }} />
+        </div>
+        <div
+          id="jobs-main-scroll"
+          className="ops-table-scroll-wrap"
+          style={{ marginLeft: -20, marginRight: -20, paddingLeft: 20, paddingRight: 20 }}
+          onScroll={(e) => {
+            const top = document.getElementById('jobs-top-scroll')
+            if (top) top.scrollLeft = e.target.scrollLeft
+            // Keep top scroll inner width in sync with table width
+            const inner = document.getElementById('jobs-top-scroll-inner')
+            if (inner) inner.style.width = e.target.scrollWidth + 'px'
+          }}
+        >
+          <table className="ops-table" ref={(el) => {
+            // Sync top scroll inner width on mount
+            if (el) {
+              const inner = document.getElementById('jobs-top-scroll-inner')
+              if (inner) inner.style.width = el.scrollWidth + 'px'
+            }
+          }}>
             <thead>
               <tr>
                 <th style={{ width: 28 }} />
@@ -1038,6 +1114,7 @@ export default function OpsJobsPage() {
               )}
             </tbody>
           </table>
+        </div>
         </div>
       </OpsSectionCard>
     </div>
