@@ -126,7 +126,8 @@ function serviceProductivity(serviceJobs, workOrders) {
 // jobs have date data (e.g. view migration not yet re-run in Supabase).
 // ─────────────────────────────────────────────────────────────────────
 function applyDateFilter(jobs, dateFrom, dateTo) {
-  let totalWithDates = 0
+  let inRange = 0
+  let outOfRange = 0
   let totalWithoutDates = 0
   const filtered = jobs.filter((j) => {
     const d = jobDates(j)
@@ -134,13 +135,13 @@ function applyDateFilter(jobs, dateFrom, dateTo) {
       totalWithoutDates++
       return false  // no date data → exclude when filter is active
     }
-    totalWithDates++
-    // Overlap check: job overlaps filter window if
-    //   job starts before window ends AND job ends after window starts
     const jobEnd = d.end || '9999-12-31'  // no end = ongoing
-    return d.start <= dateTo && jobEnd >= dateFrom
+    const overlaps = d.start <= dateTo && jobEnd >= dateFrom
+    if (overlaps) inRange++
+    else outOfRange++
+    return overlaps
   })
-  return { filtered, totalWithDates, totalWithoutDates }
+  return { filtered, totalWithDates: inRange, outOfRange, totalWithoutDates }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -745,20 +746,21 @@ export default function OpsJobsPage() {
   const allServiceJobs  = useMemo(() => effectiveJobs.filter((j) => j.type === 'service'),  [effectiveJobs])
 
   // 3. Apply date filter (affects cards too when on)
-  const { filtered: contractJobs, totalWithDates: contractDatesAvail, totalWithoutDates: contractNoDates = 0 } = useMemo(() =>
+  const { filtered: contractJobs, totalWithDates: contractDatesAvail, outOfRange: contractOut = 0, totalWithoutDates: contractNoDates = 0 } = useMemo(() =>
     dateFilterOn
       ? applyDateFilter(allContractJobs, dateFrom, dateTo)
-      : { filtered: allContractJobs, totalWithDates: allContractJobs.filter((j) => jobDates(j)?.start).length, totalWithoutDates: 0 },
+      : { filtered: allContractJobs, totalWithDates: allContractJobs.filter((j) => jobDates(j)?.start).length, outOfRange: 0, totalWithoutDates: 0 },
     [allContractJobs, dateFilterOn, dateFrom, dateTo],
   )
-  const { filtered: serviceJobs, totalWithDates: serviceDatesAvail, totalWithoutDates: serviceNoDates = 0 } = useMemo(() =>
+  const { filtered: serviceJobs, totalWithDates: serviceDatesAvail, outOfRange: serviceOut = 0, totalWithoutDates: serviceNoDates = 0 } = useMemo(() =>
     dateFilterOn
       ? applyDateFilter(allServiceJobs, dateFrom, dateTo)
-      : { filtered: allServiceJobs, totalWithDates: allServiceJobs.filter((j) => jobDates(j)?.start).length, totalWithoutDates: 0 },
+      : { filtered: allServiceJobs, totalWithDates: allServiceJobs.filter((j) => jobDates(j)?.start).length, outOfRange: 0, totalWithoutDates: 0 },
     [allServiceJobs, dateFilterOn, dateFrom, dateTo],
   )
   const datesAvailable = contractDatesAvail + serviceDatesAvail
-  const noDatesCount   = contractNoDates + serviceNoDates
+  const outOfRangeCount = contractOut + serviceOut
+  const noDatesCount    = contractNoDates + serviceNoDates
 
   // 4. Card metrics (from date-filtered job lists)
   const contractProd = useMemo(() => companyProductivity(contractJobs), [contractJobs])
@@ -856,15 +858,21 @@ export default function OpsJobsPage() {
             ↺ Reset
           </button>
           <span className="ops-small ops-text-dim">
-            {contractJobs.length} contract · {serviceJobs.length} service in range
-            {noDatesCount > 0 && datesAvailable > 0 && (
+            <span style={{ color: 'var(--pos)' }}>{contractJobs.length} contract · {serviceJobs.length} service</span>
+            {' in range'}
+            {outOfRangeCount > 0 && (
+              <span style={{ marginLeft: 8 }}>
+                · {outOfRangeCount} outside range
+              </span>
+            )}
+            {noDatesCount > 0 && (
               <span style={{ color: 'var(--gold)', marginLeft: 8 }}>
-                · {noDatesCount} job{noDatesCount !== 1 ? 's' : ''} excluded (no date data)
+                · {noDatesCount} no date data
               </span>
             )}
             {datesAvailable === 0 && (
               <span style={{ color: 'var(--neg)', marginLeft: 8 }}>
-                ⚠ No date data on live jobs — re-run ops_views.sql in Supabase
+                ⚠ No date data — re-run ops_views.sql in Supabase
               </span>
             )}
           </span>
