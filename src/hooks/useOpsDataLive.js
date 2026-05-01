@@ -107,6 +107,7 @@ function enrichJob(j) {
     startDate:     j.startDate     || null,   // COALESCE(firstInv, sagStart, contractDate) from view
     completeDate:  j.completeDate  || null,   // COALESCE(lastInv, sagComplete) from view
     contractDate:  j.contractDate  || null,
+    jobNum:        j.jobNum        || j.recnum || null,
   }
 }
 
