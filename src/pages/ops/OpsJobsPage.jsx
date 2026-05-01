@@ -117,15 +117,20 @@ function serviceProductivity(serviceJobs, workOrders) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Date-filter a job array — inclusive overlap check
+// Date-filter a job array — inclusive overlap check.
+// Returns { filtered, totalWithDates } so the UI can warn when no
+// jobs have date data (e.g. view migration not yet re-run in Supabase).
 // ─────────────────────────────────────────────────────────────────────
 function applyDateFilter(jobs, dateFrom, dateTo) {
-  return jobs.filter((j) => {
+  let totalWithDates = 0
+  const filtered = jobs.filter((j) => {
     const d = jobDates(j)
-    if (!d || !d.start) return true        // no date data → always show
+    if (!d || !d.start) return true  // no date data → pass through (don't hide)
+    totalWithDates++
     const jobEnd = d.end || '9999-12-31'
     return jobEnd >= dateFrom && d.start <= dateTo
   })
+  return { filtered, totalWithDates }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -727,14 +732,19 @@ export default function OpsJobsPage() {
   const allServiceJobs  = useMemo(() => effectiveJobs.filter((j) => j.type === 'service'),  [effectiveJobs])
 
   // 3. Apply date filter (affects cards too when on)
-  const contractJobs = useMemo(() =>
-    dateFilterOn ? applyDateFilter(allContractJobs, dateFrom, dateTo) : allContractJobs,
+  const { filtered: contractJobs, totalWithDates: contractDatesAvail } = useMemo(() =>
+    dateFilterOn
+      ? applyDateFilter(allContractJobs, dateFrom, dateTo)
+      : { filtered: allContractJobs, totalWithDates: allContractJobs.filter((j) => jobDates(j)?.start).length },
     [allContractJobs, dateFilterOn, dateFrom, dateTo],
   )
-  const serviceJobs = useMemo(() =>
-    dateFilterOn ? applyDateFilter(allServiceJobs, dateFrom, dateTo) : allServiceJobs,
+  const { filtered: serviceJobs, totalWithDates: serviceDatesAvail } = useMemo(() =>
+    dateFilterOn
+      ? applyDateFilter(allServiceJobs, dateFrom, dateTo)
+      : { filtered: allServiceJobs, totalWithDates: allServiceJobs.filter((j) => jobDates(j)?.start).length },
     [allServiceJobs, dateFilterOn, dateFrom, dateTo],
   )
+  const datesAvailable = contractDatesAvail + serviceDatesAvail
 
   // 4. Card metrics (from date-filtered job lists)
   const contractProd = useMemo(() => companyProductivity(contractJobs), [contractJobs])
@@ -803,6 +813,7 @@ export default function OpsJobsPage() {
     if (col.type === 'hrs')   return v == null ? '—' : Number(v).toFixed(0)
     if (col.type === 'num')   return v == null ? '—' : String(v)
     if (col.type === 'prod')  return fmtProductivity(v)
+    if (col.key === 'status') return v || '—'
     return v == null ? '—' : String(v)
   }
 
@@ -828,7 +839,12 @@ export default function OpsJobsPage() {
             ↺ Reset
           </button>
           <span className="ops-small ops-text-dim">
-            {contractJobs.length} contract · {serviceJobs.length} service jobs in range
+            {contractJobs.length} contract · {serviceJobs.length} service in range
+            {datesAvailable === 0 && (
+              <span style={{ color: 'var(--gold)', marginLeft: 8 }}>
+                ⚠ No start/end dates on live jobs yet — re-run ops_views.sql in Supabase to enable
+              </span>
+            )}
           </span>
         </>
       )}
