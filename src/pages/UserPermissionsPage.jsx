@@ -367,7 +367,7 @@ export default function UserPermissionsPage() {
           ) : filteredEmps.map(emp => (
             <button key={emp.id} onClick={() => { setSelected(emp.id); setDirty(false) }}
               style={{
-                width: '100%', textAlign: 'left', padding: '10px 14px', background: 'none',
+                width: '100%', textAlign: 'left', padding: '10px 14px',
                 border: 'none', borderBottom: '1px solid rgba(255,255,255,0.05)',
                 cursor: 'pointer',
                 borderLeft: `3px solid ${selected === emp.id ? 'var(--gold)' : 'transparent'}`,
