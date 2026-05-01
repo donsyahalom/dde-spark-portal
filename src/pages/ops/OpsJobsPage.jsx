@@ -41,12 +41,8 @@ const JOB_DATES_FALLBACK = {
 // Column definitions
 // ─────────────────────────────────────────────────────────────────────
 const CONTRACT_COLUMNS = [
-  { key: 'num',          label: 'Job #',        type: 'str',
-    tooltip: 'Sage short_name for the job.' },
   { key: 'name',         label: 'Name',         type: 'str',
     tooltip: 'Sage job name.' },
-  { key: 'customer',     label: 'Customer',     type: 'str',
-    tooltip: 'Client / owner on record.' },
   { key: 'contract',     label: 'Contract',     type: 'money', align: 'right',
     tooltip: 'Original contract amount (does not include COs unless booked).' },
   { key: 'revenue',      label: 'Revenue',      type: 'money', align: 'right',
@@ -66,9 +62,7 @@ const CONTRACT_COLUMNS = [
 ]
 
 const SERVICE_COLUMNS = [
-  { key: 'num',       label: 'Job #',       type: 'str' },
   { key: 'name',      label: 'Name',        type: 'str' },
-  { key: 'customer',  label: 'Customer',    type: 'str' },
   { key: 'revenue',   label: 'T&M Revenue', type: 'money', align: 'right',
     tooltip: 'Sum of all SR invoice totals billed to date.' },
   { key: 'directCost',label: 'Direct Cost', type: 'money', align: 'right',
@@ -430,7 +424,7 @@ function ContractJobRow({ job, purchaseOrders, workOrders, expanded, onToggle, f
             return <DirectCostCell key="dc" job={job} workOrders={workOrders} isService={false} />
           }
           return (
-            <td key={c.key} className={c.align === 'right' ? 'right' : ''} style={{ whiteSpace: c.type === 'str' ? 'normal' : 'nowrap' }}>
+            <td key={c.key} className={c.align === 'right' ? 'right' : ''} style={{ whiteSpace: 'nowrap' }}>
               {c.key === 'status' ? <span className={`chip ${chipCls}`}>{job.status}</span> : fmtCell(job, c)}
             </td>
           )
@@ -595,7 +589,7 @@ function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, 
             return <DirectCostCell key="dc" job={job} workOrders={workOrders} isService />
           }
           return (
-            <td key={c.key} className={c.align === 'right' ? 'right' : ''} style={{ whiteSpace: c.type === 'str' ? 'normal' : 'nowrap' }}>
+            <td key={c.key} className={c.align === 'right' ? 'right' : ''} style={{ whiteSpace: 'nowrap' }}>
               {c.key === 'status' ? <span className={`chip ${chipCls}`}>{job.status}</span> : fmtCell(job, c)}
             </td>
           )
@@ -839,12 +833,17 @@ export default function OpsJobsPage() {
           <div className="ops-kpi-value" style={{ color: prodColor(contractProd.productivity) }}>
             {contractProd.productivity == null ? '—' : contractProd.productivity.toFixed(2)}
           </div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
-            {contractProd.earnedHrs.toLocaleString()} earned ÷ {contractProd.actualHrs.toLocaleString()} actual hrs
-          </div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>
-            1.00 = on plan · {contractProd.jobCount} jobs
-          </div>
+          {contractProd.actualHrs > 0 ? (
+            <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
+              {(contractProd.earnedHrs || 0).toLocaleString()} earned ÷ {(contractProd.actualHrs || 0).toLocaleString()} actual hrs
+              <div style={{ marginTop: 2 }}>1.00 = on plan · {contractProd.jobCount} job{contractProd.jobCount === 1 ? '' : 's'}</div>
+            </div>
+          ) : (
+            <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
+              No labor hours synced yet · {contractJobs.length} contract job{contractJobs.length === 1 ? '' : 's'}
+              <div style={{ marginTop: 2 }}>Revenue: {fmtK(contractJobs.reduce((s,j) => s + j.revenue, 0))}</div>
+            </div>
+          )}
         </OpsSectionCard>
 
         <OpsSectionCard title="Contract rev / field hour" subtitle="Contract revenue ÷ actual labor hrs">
@@ -852,7 +851,9 @@ export default function OpsJobsPage() {
             {contractProd.revenuePerHour == null ? '—' : `$${contractProd.revenuePerHour.toFixed(0)}`}
           </div>
           <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
-            Revenue booked ÷ actual hours worked
+            {contractProd.revenuePerHour != null
+              ? 'Revenue booked ÷ actual hours worked'
+              : `Total revenue: ${fmtK(contractJobs.reduce((s,j) => s + j.revenue, 0))} · awaiting hour data`}
           </div>
         </OpsSectionCard>
 
@@ -871,13 +872,12 @@ export default function OpsJobsPage() {
 
       {/* Row 2 — Service */}
       <div className="ops-grid-3" style={{ marginBottom: 20 }}>
-        <OpsSectionCard title="Service productivity" subtitle="T&M revenue ÷ work-order hours">
+        <OpsSectionCard title="Service revenue" subtitle="Total T&M billing across all service jobs">
           <div className="ops-kpi-value">
-            {svcProd.revenuePerHour == null ? '—' : `$${svcProd.revenuePerHour.toFixed(0)}`}
-            <span className="ops-small ops-text-dim" style={{ fontSize: '0.8rem', fontWeight: 400, marginLeft: 6 }}>/hr</span>
+            {fmtK(svcProd.revenue)}
           </div>
           <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
-            {fmtK(svcProd.revenue)} billed · {svcProd.hours.toLocaleString()} hrs · {svcProd.jobCount} jobs
+            {svcProd.hours.toLocaleString()} total hrs · {svcProd.jobCount} active job{svcProd.jobCount === 1 ? '' : 's'}
           </div>
         </OpsSectionCard>
 
@@ -886,7 +886,9 @@ export default function OpsJobsPage() {
             {svcProd.revenuePerHour == null ? '—' : `$${svcProd.revenuePerHour.toFixed(0)}`}
           </div>
           <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
-            Avg billing rate across all service jobs
+            {svcProd.revenuePerHour != null
+              ? `Avg billing rate · ${svcProd.hours.toLocaleString()} hrs logged`
+              : `Total revenue: ${fmtK(svcProd.revenue)} · WO hours not yet synced`}
           </div>
         </OpsSectionCard>
 
@@ -974,9 +976,9 @@ export default function OpsJobsPage() {
           </div>
         }
       >
-        {/* Horizontal scroll wrapper — explicit min-width forces scrollbar when needed */}
-        <div style={{ overflowX: 'auto', overflowY: 'visible', WebkitOverflowScrolling: 'touch' }}>
-          <table className="ops-table" style={{ minWidth: 900, tableLayout: 'auto' }}>
+        {/* Horizontal scroll — card body has no overflow:hidden so this works naturally */}
+        <div style={{ overflowX: 'auto', overflowY: 'visible', WebkitOverflowScrolling: 'touch', marginLeft: -20, marginRight: -20, paddingLeft: 20, paddingRight: 20 }}>
+          <table className="ops-table" style={{ width: '100%', minWidth: 'max-content', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 <th style={{ width: 28 }}></th>
