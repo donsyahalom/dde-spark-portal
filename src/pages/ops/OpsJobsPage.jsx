@@ -1,661 +1,336 @@
 import { useMemo, useState } from 'react'
-import { Bar, Line } from 'react-chartjs-2'
-import OpsChartBox from '../../components/ops/OpsChartBox'
+import { Bar } from 'react-chartjs-2'
 import OpsSectionCard from '../../components/ops/OpsSectionCard'
-import {
-  useOpsData,
-  buildWeekly,
-  jobProductivity,
-  companyProductivity,
-} from '../../hooks/useOpsData'
-import { fmt, fmtK, pct } from '../../lib/opsFormat'
+import OpsChartBox from '../../components/ops/OpsChartBox'
+import { useOpsData } from '../../hooks/useOpsData'
+import { useAuth } from '../../context/AuthContext'
 import { moneyLineOpts, PALETTE } from '../../lib/opsChartOpts'
+import { fmt, fmtK, pct } from '../../lib/opsFormat'
 
-// Contract-job table columns.  `gpDol`, `gpPct`, `subPct`, `directCost`
-// come from enrichJob().  `productivity` is computed per-row.
+// Jobs P&L — Don's directives, all in one page:
 //
-// Each column carries an inline `tooltip` describing the calculation /
-// source so the field crew can see at a glance how a number was derived.
-// The tooltip renders on hover via the native browser title attribute
-// AND a small ⓘ icon next to the header label so it's discoverable.
-const CONTRACT_COLUMNS = [
-  { key: 'num',          label: 'Job #',        type: 'str',
-    tooltip: 'Sage short_name for the job, used as the public job number.' },
-  { key: 'name',         label: 'Name',         type: 'str',
-    tooltip: 'Sage job name (sage.jobs.job_name).' },
-  { key: 'contract',     label: 'Contract',     type: 'money', align: 'right',
-    tooltip: 'Original contract amount (sage.jobs.contract_amount). Does not include change orders unless they have been booked into the contract.' },
-  { key: 'revenue',      label: 'Revenue',      type: 'money', align: 'right',
-    tooltip: 'Sum of all AR invoice totals booked to this job (billed-to-date).' },
-  { key: 'directCost',   label: 'Direct Cost',  type: 'money', align: 'right',
-    tooltip: 'Labor + Material + Subs + Equipment + Bonds + Permits + Other, summed from sage.job_cost_transactions. Bonds and Permits are 0 today (no distinct cost-type in Sage v27).' },
-  { key: 'gpDol',        label: 'GP $',         type: 'money', align: 'right',
-    tooltip: 'Gross Profit = Revenue − Direct Cost.' },
-  { key: 'gpPct',        label: 'GP %',         type: 'pct',   align: 'right',
-    tooltip: 'Gross Profit % = (GP $ ÷ Revenue) × 100.' },
-  { key: 'pctCmp',       label: '% Cmp',        type: 'pct',   align: 'right',
-    tooltip: 'Manual override from sage.jobs.percent_complete if a PM has set it. Otherwise computed: (cost-to-date ÷ total budget) × 100, capped at 100%. Returns 0 if no budget on file.' },
-  { key: 'productivity', label: 'Productivity', type: 'prod',  align: 'right',
-    tooltip: 'Earned-value productivity = (budget hrs × % complete) ÷ actual hrs. 1.00 = on plan, >1.00 ahead, <1.00 behind. Shows — when there are no budgeted labor hours.' },
-  { key: 'status',       label: 'Status',       type: 'str',
-    tooltip: 'Active, On Hold, or Closed. Mapped from sage.jobs.status: 0,1=Active, 2=Hold, 3,4=Closed.' },
-]
-
-// Service-job table (T&M) — different metrics.
-const SERVICE_COLUMNS = [
-  { key: 'num',       label: 'Job #',        type: 'str',
-    tooltip: 'Sage short_name for the service job.' },
-  { key: 'name',      label: 'Name',         type: 'str',
-    tooltip: 'Service job name.' },
-  { key: 'customer',  label: 'Customer',     type: 'str',
-    tooltip: 'Job contact (sage.jobs.contact), falling back to job name if blank.' },
-  { key: 'revenue',   label: 'T&M Revenue',  type: 'money', align: 'right',
-    tooltip: 'Sum of all AR invoice totals booked to this service job.' },
-  { key: 'hours',     label: 'Hours',        type: 'hrs',   align: 'right',
-    tooltip: 'Total hours from all work orders attached to this job.' },
-  { key: 'avgRate',   label: 'Avg $/hr',     type: 'money', align: 'right',
-    tooltip: 'Total billed amount ÷ total hours, across all work orders.' },
-  { key: 'openWos',   label: 'Open WOs',     type: 'num',   align: 'right',
-    tooltip: 'Count of work orders with status = "open".' },
-  { key: 'status',    label: 'Status',       type: 'str',
-    tooltip: 'Active, On Hold, or Closed.' },
-]
-
-// ── Cost-bucket metadata ──
-const COST_BUCKETS = [
-  { key: 'labor',     label: 'Labor',     color: PALETTE.blue },
-  { key: 'material',  label: 'Material',  color: PALETTE.amber },
-  { key: 'subs',      label: 'Subs',      color: PALETTE.red },
-  { key: 'equipment', label: 'Equipment', color: PALETTE.purple },
-  { key: 'bonds',     label: 'Bonds',     color: PALETTE.green },
-  { key: 'permits',   label: 'Permits',   color: '#E879F9' },
-  { key: 'other',     label: 'Other',     color: 'rgba(255,255,255,0.45)' },
-]
-
-function fmtProductivity(p) {
-  if (p == null) return '—'
-  const cls = p >= 1 ? 'ops-text-pos' : p >= 0.9 ? '' : 'ops-text-neg'
-  return <span className={cls}>{p.toFixed(2)}</span>
-}
-
-// Renders a column-header cell with the label + an info icon.  The
-// native title attribute gives the hover tooltip; the icon makes the
-// presence of help text visible without any JS or CSS additions.
-function ColumnHeader({ col, sortKey, sortDir, onClick }) {
-  const arrow = sortKey === col.key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
-  return (
-    <th
-      onClick={onClick}
-      className={col.align === 'right' ? 'right' : ''}
-      style={{ cursor: 'pointer', userSelect: 'none' }}
-      title={col.tooltip || ''}
-    >
-      {col.label}
-      {col.tooltip && (
-        <span
-          aria-label={col.tooltip}
-          title={col.tooltip}
-          style={{
-            display: 'inline-block',
-            marginLeft: 4,
-            fontSize: '0.78em',
-            opacity: 0.55,
-            cursor: 'help',
-            verticalAlign: 'baseline',
-          }}
-        >
-          ⓘ
-        </span>
-      )}
-      {arrow}
-    </th>
-  )
-}
+//   1. Per-row Contract/Service override.  "the admin should be able to
+//      set that. Nobody else. It should persist to all users once the
+//      admin makes a change."  Implemented via setJobTypeOverride()
+//      from the hook, which writes to ops.job_type_overrides.  Non-
+//      admins see the chip but the dropdown is disabled.  Once a
+//      change is saved, refresh() pulls the override back through
+//      ops.jobs and ops.ar_invoices so AR re-buckets too.
+//
+//   2. Top-10 contributors on Direct Cost.  Hover any bar in the
+//      Direct Cost chart and the tooltip shows the top 10 cost
+//      buckets (labor / material / sub / equip / other) for that job
+//      ordered by $ contribution.
+//
+//   3. Split company productivity + revenue/field-hour into Contract
+//      vs Service columns.  We compute earned-value style metrics
+//      (revenue per field hour, GP per field hour) for the contract
+//      pool and the service pool separately and render two cards
+//      side-by-side.
 
 export default function OpsJobsPage() {
-  const { jobs, purchaseOrders, workOrders } = useOpsData()
-  const [view, setView]       = useState('contract')
-  const [q, setQ]             = useState('')
-  const [status, setStatus]   = useState('all')
-  const [sortKey, setSortKey] = useState('revenue')
-  const [sortDir, setSortDir] = useState('desc')
-  const [expanded, setExpanded] = useState(null)
-  const [mode, setMode]       = useState('actual')
+  const { jobs, setJobTypeOverride, clearJobTypeOverride, refresh } = useOpsData()
+  const { currentUser } = useAuth()
+  const isAdmin = Boolean(currentUser?.is_admin)
+  const adminEmail = currentUser?.email || null
 
-  const contractJobs = useMemo(() => jobs.filter((j) => j.type === 'contract'), [jobs])
-  const serviceJobs  = useMemo(() => jobs.filter((j) => j.type === 'service'),  [jobs])
+  const [savingKey, setSavingKey] = useState(null)
+  const [err, setErr] = useState(null)
+  const [q, setQ] = useState('')
+  const [showService, setShowService] = useState(true)
+  const [showContract, setShowContract] = useState(true)
 
-  const tmRollup = useMemo(() => {
-    if (!serviceJobs.length) return null
-    const rev = serviceJobs.reduce((s, j) => s + j.revenue, 0)
-    const cost = serviceJobs.reduce((s, j) => s + j.directCost, 0)
-    const hrs = workOrders.reduce((s, w) => s + w.hours, 0)
-    const openWos = workOrders.filter((w) => w.status === 'open').length
-    return {
-      num: 'T&M',
-      name: 'Time & Material (service rollup)',
-      contract: null,
-      revenue: rev,
-      directCost: cost,
-      gpDol: rev - cost,
-      gpPct: rev ? +(((rev - cost) / rev) * 100).toFixed(1) : 0,
-      pctCmp: null,
-      productivity: null,
-      status: 'Active',
-      isRollup: true,
-      hrs,
-      openWos,
-    }
-  }, [serviceJobs, workOrders])
-
-  const serviceRows = useMemo(() => {
-    return serviceJobs.map((j) => {
-      const wos  = workOrders.filter((w) => w.jobNum === j.num)
-      const hrs  = wos.reduce((s, w) => s + w.hours, 0)
-      const bill = wos.reduce((s, w) => s + w.billed, 0)
-      const openWos = wos.filter((w) => w.status === 'open').length
-      return {
-        ...j,
-        hours:   hrs,
-        avgRate: hrs ? +(bill / hrs).toFixed(0) : 0,
-        openWos,
-        workOrders: wos,
-      }
-    })
-  }, [serviceJobs, workOrders])
-
-  const prodSummary = useMemo(() => companyProductivity(jobs), [jobs])
-
-  const rows = useMemo(() => {
-    const source = view === 'contract'
-      ? [...contractJobs.map((j) => ({ ...j, productivity: jobProductivity(j).productivity })), ...(tmRollup ? [tmRollup] : [])]
-      : serviceRows
-    let filtered = source.slice()
+  const filtered = useMemo(() => {
+    let rows = jobs || []
+    if (!showContract) rows = rows.filter((j) => j.type === 'service')
+    if (!showService)  rows = rows.filter((j) => j.type !== 'service')
     if (q.trim()) {
       const needle = q.toLowerCase()
-      filtered = filtered.filter((j) =>
-        j.name.toLowerCase().includes(needle) || String(j.num).toLowerCase().includes(needle))
+      rows = rows.filter((j) =>
+        (j.name || '').toLowerCase().includes(needle) ||
+        (j.num || '').toString().toLowerCase().includes(needle))
     }
-    if (status !== 'all') filtered = filtered.filter((j) => j.status === status)
-    filtered.sort((a, b) => {
-      if (a.isRollup && !b.isRollup) return 1
-      if (b.isRollup && !a.isRollup) return -1
-      const av = a[sortKey]; const bv = b[sortKey]
-      if (av == null && bv == null) return 0
-      if (av == null) return 1
-      if (bv == null) return -1
-      if (typeof av === 'number' && typeof bv === 'number') {
-        return sortDir === 'asc' ? av - bv : bv - av
-      }
-      return sortDir === 'asc'
-        ? String(av).localeCompare(String(bv))
-        : String(bv).localeCompare(String(av))
-    })
-    return filtered
-  }, [view, contractJobs, serviceRows, tmRollup, q, status, sortKey, sortDir])
+    return rows
+  }, [jobs, q, showContract, showService])
 
-  const columns = view === 'contract' ? CONTRACT_COLUMNS : SERVICE_COLUMNS
+  // ── Top-N by Direct Cost, with breakdown for the tooltip ──
+  const topByDirectCost = useMemo(() => {
+    return (filtered || [])
+      .slice()
+      .sort((a, b) => (b.directCost || 0) - (a.directCost || 0))
+      .slice(0, 10)
+  }, [filtered])
 
-  const toggleSort = (k) => {
-    if (sortKey === k) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-    else { setSortKey(k); setSortDir('desc') }
+  const dcChartData = {
+    labels: topByDirectCost.map((j) => `${j.num} · ${j.name?.slice(0, 18) || ''}`),
+    datasets: [
+      { label: 'Labor',     data: topByDirectCost.map((j) => j.laborCost     || 0), backgroundColor: 'rgba(111,168,255,0.65)', borderColor: PALETTE.blue,  borderWidth: 1, stack: 'dc' },
+      { label: 'Material',  data: topByDirectCost.map((j) => j.materialCost  || 0), backgroundColor: 'rgba(76,175,80,0.65)',   borderColor: PALETTE.green, borderWidth: 1, stack: 'dc' },
+      { label: 'Subcontract', data: topByDirectCost.map((j) => j.subCost     || 0), backgroundColor: 'rgba(255,193,7,0.65)',   borderColor: '#ffc107',     borderWidth: 1, stack: 'dc' },
+      { label: 'Equipment', data: topByDirectCost.map((j) => j.equipCost     || 0), backgroundColor: 'rgba(156,39,176,0.65)',  borderColor: '#9c27b0',     borderWidth: 1, stack: 'dc' },
+      { label: 'Other',     data: topByDirectCost.map((j) => j.otherCost     || 0), backgroundColor: 'rgba(229,57,53,0.55)',   borderColor: PALETTE.red,   borderWidth: 1, stack: 'dc' },
+    ],
   }
 
-  const fmtCell = (j, col) => {
-    const v = j[col.key]
-    if (col.type === 'money') return v == null ? '—' : fmt(v)
-    if (col.type === 'pct')   return v == null ? '—' : pct(v, 0)
-    if (col.type === 'hrs')   return v == null ? '—' : `${Number(v).toFixed(0)}`
-    if (col.type === 'num')   return v == null ? '—' : String(v)
-    if (col.type === 'prod')  return fmtProductivity(v)
-    return String(v ?? '—')
+  const dcChartOpts = moneyLineOpts({
+    plugins: {
+      tooltip: {
+        // Custom: show top-10 contributors (cost buckets) ranked by $
+        // for the hovered job.
+        callbacks: {
+          title: (items) => {
+            if (!items?.length) return ''
+            const j = topByDirectCost[items[0].dataIndex]
+            return j ? `${j.num} — ${j.name}` : ''
+          },
+          label: () => '',
+          afterBody: (items) => {
+            if (!items?.length) return []
+            const j = topByDirectCost[items[0].dataIndex]
+            if (!j) return []
+            const buckets = [
+              { label: 'Labor',     value: j.laborCost     || 0 },
+              { label: 'Material',  value: j.materialCost  || 0 },
+              { label: 'Subcontract', value: j.subCost     || 0 },
+              { label: 'Equipment', value: j.equipCost     || 0 },
+              { label: 'Other',     value: j.otherCost     || 0 },
+            ]
+              .filter((b) => b.value !== 0)
+              .sort((a, b) => b.value - a.value)
+              .slice(0, 10)
+            const total = buckets.reduce((a, b) => a + b.value, 0) || 1
+            const lines = buckets.map((b) =>
+              `  ${b.label.padEnd(12, ' ')} ${fmtK(b.value)}  (${pct(b.value / total)})`,
+            )
+            return [
+              `Total direct cost: ${fmtK(j.directCost || 0)}`,
+              '',
+              'Top contributors:',
+              ...lines,
+            ]
+          },
+        },
+      },
+    },
+    scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true } },
+  })
+
+  // ── Productivity split: contract vs service ──
+  const prodSummary = useMemo(() => {
+    const split = (rows) => {
+      const fieldHrs = rows.reduce((a, j) => a + (j.fieldHours || 0), 0)
+      const revenue  = rows.reduce((a, j) => a + (j.revenue    || 0), 0)
+      const gp       = rows.reduce((a, j) => a + (j.gp         || 0), 0)
+      const earned   = rows.reduce((a, j) => a + (j.earnedValue || 0), 0)
+      const directCost = rows.reduce((a, j) => a + (j.directCost || 0), 0)
+      return {
+        rows: rows.length,
+        fieldHrs,
+        revenue,
+        gp,
+        gpPct:           revenue > 0 ? (gp / revenue) * 100 : 0,
+        revPerFieldHr:   fieldHrs > 0 ? revenue / fieldHrs : 0,
+        gpPerFieldHr:    fieldHrs > 0 ? gp / fieldHrs : 0,
+        earned,
+        directCost,
+        productivityPct: earned > 0 ? (earned / Math.max(directCost, 1)) * 100 : null,
+      }
+    }
+    const contract = split((jobs || []).filter((j) => j.type !== 'service'))
+    const service  = split((jobs || []).filter((j) => j.type === 'service'))
+    return { contract, service }
+  }, [jobs])
+
+  const onTypeChange = async (job, nextType) => {
+    if (!isAdmin) return
+    if (!setJobTypeOverride || !clearJobTypeOverride) {
+      setErr('Override API not available — patch_features.sql may not be applied yet.')
+      return
+    }
+    const key = `${job.source_company}::${job.job_recnum}`
+    setSavingKey(key)
+    setErr(null)
+    try {
+      // 'auto' clears the override; any other value sets it.
+      if (nextType === 'auto') {
+        await clearJobTypeOverride({
+          source_company: job.source_company,
+          job_recnum:     job.job_recnum,
+        })
+      } else {
+        await setJobTypeOverride({
+          source_company: job.source_company,
+          job_recnum:     job.job_recnum,
+          override_type:  nextType,        // 'contract' | 'service'
+          set_by_email:   adminEmail,
+        })
+      }
+      if (refresh) await refresh()
+    } catch (e) {
+      console.error(e)
+      setErr(e.message || 'Failed to save override')
+    } finally {
+      setSavingKey(null)
+    }
   }
 
   return (
     <div>
-      {/* ── Productivity summary cards ───────────────────────────── */}
-      <div className="ops-grid-4">
-        <OpsSectionCard
-          title="Company productivity"
-          subtitle="Earned-value across all contract jobs"
-        >
-          <div className="ops-kpi-value">
-            {prodSummary.productivity == null ? '—' : prodSummary.productivity.toFixed(2)}
-          </div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
-            {prodSummary.earnedHrs.toLocaleString()} earned hrs ÷ {prodSummary.actualHrs.toLocaleString()} actual hrs
-          </div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>
-            1.00 = on plan · {prodSummary.jobCount} contract jobs
-          </div>
-        </OpsSectionCard>
-        <OpsSectionCard title="Revenue per field hour" subtitle="Contract jobs only">
-          <div className="ops-kpi-value">
-            {prodSummary.revenuePerHour == null ? '—' : `$${prodSummary.revenuePerHour.toFixed(0)}`}
-          </div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
-            Revenue booked ÷ actual hours worked
-          </div>
-        </OpsSectionCard>
-        <OpsSectionCard
-          title="How we measure productivity"
-          subtitle="Earned value, shown on every row"
-        >
-          <div className="ops-small" style={{ color: 'var(--white-dim)', lineHeight: 1.55 }}>
-            <div style={{ color: 'var(--white)', fontWeight: 600 }}>
-              productivity = (budgeted hrs × % complete) ÷ actual hrs
-            </div>
-            <div style={{ marginTop: 4 }}>
-              1.00 = on plan · {'>'}1.00 ahead · {'<'}1.00 behind
-            </div>
-            <div style={{ marginTop: 4 }}>
-              Service (T&amp;M) jobs are excluded — no %&nbsp;complete.
-            </div>
-          </div>
-        </OpsSectionCard>
-        <OpsSectionCard title="Retainage held (all contract jobs)" subtitle="Per-job detail in expanded row">
-          <div className="ops-kpi-value">
-            {fmtK(contractJobs.reduce((s, j) => s + (j.retainageHeld || 0), 0))}
-          </div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
-            Contracted: {fmtK(contractJobs.reduce((s, j) => s + (j.contractedRetention || 0), 0))}
-          </div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>
-            Release schedule tied to % complete (95% / 100%).
-          </div>
-        </OpsSectionCard>
+      {/* Productivity split */}
+      <div className="ops-grid-2">
+        <ProductivityCard title="Contract productivity" data={prodSummary.contract} accent="contract" />
+        <ProductivityCard title="Service productivity"  data={prodSummary.service}  accent="service"  />
       </div>
 
       <OpsSectionCard
-        title={view === 'contract' ? 'Jobs P&L — Contract' : 'Jobs P&L — Service (T&M)'}
+        title="Direct cost — top 10 jobs"
+        subtitle="Hover a bar to see the top contributing cost buckets for that job."
+      >
+        <OpsChartBox size="lg">
+          <Bar data={dcChartData} options={dcChartOpts} />
+        </OpsChartBox>
+      </OpsSectionCard>
+
+      <OpsSectionCard
+        title="Jobs"
         subtitle={
-          view === 'contract'
-            ? 'Click any column header to sort. Click a row to expand cost buckets, POs, weekly curve, and retainage. Hover the ⓘ next to any column header to see how the value is calculated.'
-            : 'Click a row to expand the work-order list for that service job. Hover the ⓘ next to any column header to see the data source.'
+          isAdmin
+            ? 'Click the type cell on any row to override Contract↔Service. Persists for everyone.'
+            : 'Type column reflects the current Contract/Service classification (admin-controlled).'
         }
         right={
           <div className="ops-toolbar">
-            <div className="ops-toggle" title="Contract jobs vs service (T&M) jobs">
-              <button onClick={() => { setView('contract'); setExpanded(null) }} className={view === 'contract' ? 'active' : ''}>Contract</button>
-              <button onClick={() => { setView('service');  setExpanded(null) }} className={view === 'service'  ? 'active' : ''}>Service</button>
-            </div>
+            <label className="ops-checkbox" style={{ marginRight: 8 }}>
+              <input type="checkbox" checked={showContract} onChange={(e) => setShowContract(e.target.checked)} />
+              Contract
+            </label>
+            <label className="ops-checkbox" style={{ marginRight: 8 }}>
+              <input type="checkbox" checked={showService}  onChange={(e) => setShowService(e.target.checked)} />
+              Service
+            </label>
             <input
               className="ops-input"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search job # or name"
-              style={{ width: 220 }}
+              placeholder="Search job name / #"
+              style={{ width: 240 }}
             />
-            <select className="ops-select" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="all">All statuses</option>
-              <option value="Active">Active</option>
-              <option value="Hold">On hold</option>
-              <option value="Closed">Closed</option>
-            </select>
-            {view === 'contract' && (
-              <div className="ops-toggle" title="Actual = per-week; Accumulated = running totals">
-                <button onClick={() => setMode('actual')}      className={mode === 'actual'      ? 'active' : ''}>Actual</button>
-                <button onClick={() => setMode('accumulated')} className={mode === 'accumulated' ? 'active' : ''}>Accumulated</button>
-              </div>
-            )}
           </div>
         }
       >
-        <div style={{ overflowX: 'auto' }}>
-          <table className="ops-table">
-            <thead>
-              <tr>
-                <th style={{ width: 24 }}></th>
-                {columns.map((c) => (
-                  <ColumnHeader
-                    key={c.key}
-                    col={c}
-                    sortKey={sortKey}
-                    sortDir={sortDir}
-                    onClick={() => toggleSort(c.key)}
-                  />
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((j) => (
-                view === 'contract'
-                  ? <ContractJobRow
-                      key={j.num}
-                      job={j}
-                      purchaseOrders={purchaseOrders}
-                      expanded={expanded === j.num}
-                      onToggle={() => setExpanded(expanded === j.num ? null : j.num)}
-                      fmtCell={fmtCell}
-                      columns={columns}
-                      mode={mode}
-                    />
-                  : <ServiceJobRow
-                      key={j.num}
-                      job={j}
-                      expanded={expanded === j.num}
-                      onToggle={() => setExpanded(expanded === j.num ? null : j.num)}
-                      fmtCell={fmtCell}
-                      columns={columns}
-                    />
-              ))}
-              {!rows.length && (
-                <tr>
-                  <td colSpan={columns.length + 1} className="center ops-text-dim" style={{ padding: '24px 0' }}>
-                    No jobs match the current filters.
+        {err && (
+          <div className="ops-text-neg ops-small" style={{ marginBottom: 8 }}>
+            {err}
+          </div>
+        )}
+        <table className="ops-table">
+          <thead>
+            <tr>
+              <th>Job #</th>
+              <th>Name</th>
+              <th>Type</th>
+              <th className="right">Contract $</th>
+              <th className="right">Revenue</th>
+              <th className="right">Direct cost</th>
+              <th className="right">GP</th>
+              <th className="right">GP %</th>
+              <th className="right">% complete</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((j) => {
+              const key = `${j.source_company}::${j.job_recnum}`
+              const isService  = j.type === 'service'
+              const overridden = Boolean(j.typeOverridden)
+              const currentSel = overridden ? (isService ? 'service' : 'contract') : 'auto'
+              const gpClass = (j.gpPct || 0) < 10 ? 'ops-text-warn' : (j.gpPct || 0) < 0 ? 'ops-text-neg' : ''
+              return (
+                <tr key={key}>
+                  <td style={{ fontWeight: 600 }}>{j.num}</td>
+                  <td>{j.name}</td>
+                  <td>
+                    {isAdmin ? (
+                      <select
+                        className="ops-input"
+                        value={currentSel}
+                        disabled={savingKey === key}
+                        onChange={(e) => onTypeChange(j, e.target.value)}
+                        style={{ padding: '2px 6px', fontSize: '0.8rem' }}
+                        title={overridden ? 'Admin override — click to change' : 'Auto-classified — click to override'}
+                      >
+                        <option value="auto">Auto</option>
+                        <option value="contract">Contract</option>
+                        <option value="service">Service</option>
+                      </select>
+                    ) : (
+                      <span className={`chip ${isService ? 'hold' : 'active'}`} title={overridden ? 'Admin-overridden' : 'Auto-classified'}>
+                        {isService ? 'Service' : 'Contract'}
+                        {overridden ? ' *' : ''}
+                      </span>
+                    )}
                   </td>
+                  <td className="right">{fmt(j.contractAmount)}</td>
+                  <td className="right">{fmt(j.revenue)}</td>
+                  <td className="right">{fmt(j.directCost)}</td>
+                  <td className="right" style={{ fontWeight: 600 }}>{fmt(j.gp)}</td>
+                  <td className={`right ${gpClass}`}>{Math.round(j.gpPct || 0)}%</td>
+                  <td className="right">{Math.round((j.pctComplete || 0) * 100)}%</td>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              )
+            })}
+            {!filtered.length && (
+              <tr><td colSpan={9} className="center ops-text-dim" style={{ padding: '24px 0' }}>
+                No jobs match the current filters.
+              </td></tr>
+            )}
+          </tbody>
+        </table>
       </OpsSectionCard>
     </div>
   )
 }
 
-function runSum(arr) {
-  let s = 0
-  return arr.map((v) => (s += v))
-}
-
-// ── Contract-job row ──────────────────────────────────────────────
-function ContractJobRow({ job, purchaseOrders, expanded, onToggle, fmtCell, columns, mode }) {
-  if (job.isRollup) {
-    return (
-      <tr style={{ fontStyle: 'italic', borderTop: '1px dashed var(--border-bright)' }}>
-        <td style={{ width: 24 }}></td>
-        {columns.map((c) => (
-          <td key={c.key} className={c.align === 'right' ? 'right' : ''}>
-            {c.key === 'status'
-              ? <span className="chip active">T&amp;M</span>
-              : fmtCell(job, c)}
-          </td>
-        ))}
-      </tr>
-    )
-  }
-
-  const costTot  = job.directCost
-  const weekly   = useMemo(() => buildWeekly(job.revenue, costTot), [job.revenue, costTot])
-
-  const series = useMemo(() => {
-    if (mode === 'accumulated') {
-      return { revenue: runSum(weekly.revenue), cogs: runSum(weekly.cogs), gp: runSum(weekly.gp) }
-    }
-    return { revenue: weekly.revenue, cogs: weekly.cogs, gp: weekly.gp }
-  }, [weekly, mode])
-
-  const lineData = {
-    labels: weekly.labels,
-    datasets: [
-      { label: 'Revenue',     data: series.revenue, borderColor: PALETTE.blue,  backgroundColor: 'rgba(111,168,255,0.10)', fill: true, tension: 0.3, borderWidth: 2 },
-      { label: 'Direct Cost', data: series.cogs,    borderColor: PALETTE.red,   backgroundColor: 'transparent', tension: 0.3, borderWidth: 2 },
-      { label: 'GP',          data: series.gp,      borderColor: PALETTE.green, backgroundColor: 'transparent', tension: 0.3, borderWidth: 2 },
-    ],
-  }
-
-  const bucketValues = COST_BUCKETS.map((b) => job[b.key] || 0)
-  const bucketData = {
-    labels: COST_BUCKETS.map((b) => b.label),
-    datasets: [{
-      label: 'Direct cost ($)',
-      data: bucketValues,
-      backgroundColor: COST_BUCKETS.map((b) => b.color),
-      borderWidth: 0,
-    }],
-  }
-  const bucketOpts = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        callbacks: {
-          label: (ctx) => `${ctx.label}: ${fmt(ctx.parsed.y)} (${pct(costTot ? (ctx.parsed.y / costTot) * 100 : 0, 0)})`,
-        },
-      },
-    },
-    scales: {
-      x: { grid: { display: false }, ticks: { color: 'rgba(255,255,255,0.82)', font: { size: 10 } } },
-      y: {
-        grid: { color: 'rgba(240,192,64,0.14)' },
-        ticks: { color: 'rgba(255,255,255,0.82)', font: { size: 10 }, callback: (v) => fmtK(Number(v)) },
-      },
-    },
-  }
-
-  const jobPOs = purchaseOrders.filter((p) => p.jobNum === job.num)
-  const poBilledTot      = jobPOs.reduce((s, p) => s + p.billed, 0)
-  const poOutstandingTot = jobPOs.reduce((s, p) => s + (p.amount - p.billed), 0)
-
-  const { productivity, earnedHrs } = jobProductivity(job)
-
-  const chipCls = job.status === 'Closed' ? 'closed' : job.status === 'Hold' ? 'hold' : 'active'
-
+// ── Helper presentational card for the contract/service productivity split ──
+function ProductivityCard({ title, data, accent }) {
+  const cls = accent === 'service' ? 'hold' : 'active'
   return (
-    <>
-      <tr className="clickable" onClick={onToggle}>
-        <td className="ops-text-dim ops-small" style={{ width: 24 }}>{expanded ? '▾' : '▸'}</td>
-        {columns.map((c) => (
-          <td key={c.key} className={c.align === 'right' ? 'right' : ''}>
-            {c.key === 'status'
-              ? <span className={`chip ${chipCls}`}>{job.status}</span>
-              : fmtCell(job, c)}
-          </td>
-        ))}
-      </tr>
-      {expanded && (
-        <tr>
-          <td colSpan={columns.length + 1} className="ops-row-expand">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, flexWrap: 'wrap', gap: 12 }}>
-              <div>
-                <div style={{ fontWeight: 700, color: 'var(--white)' }}>{job.name}</div>
-                <div className="ops-small ops-text-dim">
-                  Rev {fmtK(job.revenue)} · Direct Cost {fmtK(costTot)} · GP {fmtK(job.revenue - costTot)} ({pct(job.gpPct, 1)})
-                </div>
-              </div>
-              <div className="ops-small ops-text-dim" style={{ textAlign: 'right', maxWidth: 320 }}>
-                <div>Budget: {job.budgetLaborHrs?.toLocaleString()} hrs · Actual: {job.actualLaborHrs?.toLocaleString()} hrs</div>
-                <div>Earned: {Math.round(earnedHrs).toLocaleString()} hrs · Productivity {productivity == null ? '—' : productivity.toFixed(2)}</div>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.5fr) minmax(0,1fr)', gap: 14, marginBottom: 14 }}>
-              <div>
-                <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>Direct cost breakdown</div>
-                <OpsChartBox size="sm">
-                  <Bar data={bucketData} options={bucketOpts} />
-                </OpsChartBox>
-              </div>
-              <div>
-                <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>Buckets ($)</div>
-                <table className="ops-table" style={{ fontSize: '0.8rem' }}>
-                  <tbody>
-                    {COST_BUCKETS.map((b, i) => (
-                      <tr key={b.key}>
-                        <td>
-                          <span style={{ display: 'inline-block', width: 10, height: 10, background: b.color, borderRadius: 2, marginRight: 6 }} />
-                          {b.label}
-                        </td>
-                        <td className="right">{fmt(bucketValues[i])}</td>
-                        <td className="right ops-text-dim">{costTot ? pct((bucketValues[i] / costTot) * 100, 0) : '—'}</td>
-                      </tr>
-                    ))}
-                    <tr style={{ borderTop: '1px solid var(--border-bright)', fontWeight: 700 }}>
-                      <td>Direct Cost</td>
-                      <td className="right">{fmt(costTot)}</td>
-                      <td className="right ops-text-dim">100%</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 14 }}>
-              <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>
-                Weekly curve <span className="ops-text-dim" style={{ fontWeight: 400 }}>({mode === 'accumulated' ? 'accumulated' : 'actual'})</span>
-              </div>
-              <OpsChartBox size="md">
-                <Line data={lineData} options={moneyLineOpts()} />
-              </OpsChartBox>
-            </div>
-
-            <div style={{ marginBottom: 14 }}>
-              <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>
-                Purchase orders · outstanding = commitment (variable / direct cost)
-              </div>
-              {jobPOs.length === 0 ? (
-                <div className="ops-small ops-text-dim">No POs on file for this job.</div>
-              ) : (
-                <table className="ops-table" style={{ fontSize: '0.8rem' }}>
-                  <thead>
-                    <tr>
-                      <th>PO #</th>
-                      <th>Vendor</th>
-                      <th>Description</th>
-                      <th className="right">Amount</th>
-                      <th className="right">Billed</th>
-                      <th className="right">Outstanding</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {jobPOs.map((p) => {
-                      const outstanding = p.amount - p.billed
-                      return (
-                        <tr key={p.po}>
-                          <td>{p.po}</td>
-                          <td>{p.vendor}</td>
-                          <td className="ops-text-dim">{p.desc}</td>
-                          <td className="right">{fmt(p.amount)}</td>
-                          <td className="right">{fmt(p.billed)}</td>
-                          <td className={`right ${outstanding > 0 ? 'ops-text-neg' : ''}`}>{fmt(outstanding)}</td>
-                          <td><span className={`chip ${p.status === 'closed' ? 'closed' : 'active'}`}>{p.status}</span></td>
-                        </tr>
-                      )
-                    })}
-                    <tr style={{ borderTop: '1px solid var(--border-bright)', fontWeight: 700 }}>
-                      <td colSpan={3}>Total</td>
-                      <td className="right">{fmt(jobPOs.reduce((s, p) => s + p.amount, 0))}</td>
-                      <td className="right">{fmt(poBilledTot)}</td>
-                      <td className="right ops-text-neg">{fmt(poOutstandingTot)}</td>
-                      <td></td>
-                    </tr>
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            <div>
-              <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>Retainage</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
-                <div className="ops-stat-box">
-                  <div className="ops-small ops-text-dim">Contract retention rate</div>
-                  <div style={{ fontWeight: 700, color: 'var(--white)' }}>{pct(job.retainagePct, 0)}</div>
-                </div>
-                <div className="ops-stat-box">
-                  <div className="ops-small ops-text-dim">Contracted retention $</div>
-                  <div style={{ fontWeight: 700, color: 'var(--white)' }}>{fmt(job.contractedRetention)}</div>
-                </div>
-                <div className="ops-stat-box">
-                  <div className="ops-small ops-text-dim">Held to date</div>
-                  <div style={{ fontWeight: 700, color: 'var(--white)' }}>{fmt(job.retainageHeld || 0)}</div>
-                </div>
-                <div className="ops-stat-box">
-                  <div className="ops-small ops-text-dim">% complete</div>
-                  <div style={{ fontWeight: 700, color: 'var(--white)' }}>{pct(job.pctCmp, 0)}</div>
-                </div>
-              </div>
-              {job.releaseSchedule?.length > 0 && (
-                <table className="ops-table" style={{ fontSize: '0.8rem', marginTop: 8 }}>
-                  <thead>
-                    <tr>
-                      <th>Trigger (% complete)</th>
-                      <th className="right">Release %</th>
-                      <th>Note</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {job.releaseSchedule.map((r) => {
-                      const hit = job.pctCmp >= r.atPctCmp
-                      return (
-                        <tr key={r.atPctCmp}>
-                          <td>{r.atPctCmp}%</td>
-                          <td className="right">{r.releasePct}%</td>
-                          <td className={hit ? 'ops-text-pos' : 'ops-text-dim'}>
-                            {hit ? '✓ eligible · ' : '◦ pending · '}{r.note}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </td>
-        </tr>
+    <OpsSectionCard
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          {title}
+          <span className={`chip ${cls}`}>{accent === 'service' ? 'Service' : 'Contract'}</span>
+        </span>
+      }
+      subtitle={`${data.rows} job${data.rows === 1 ? '' : 's'} in scope.`}
+    >
+      <div className="ops-grid-2">
+        <div className="ops-kpi">
+          <div className="ops-kpi-label">Revenue</div>
+          <div className="ops-kpi-value">{fmtK(data.revenue)}</div>
+        </div>
+        <div className="ops-kpi">
+          <div className="ops-kpi-label">GP</div>
+          <div className="ops-kpi-value">{fmtK(data.gp)}</div>
+          <div className="ops-small ops-text-dim">{Math.round(data.gpPct)}%</div>
+        </div>
+        <div className="ops-kpi">
+          <div className="ops-kpi-label">Field hours</div>
+          <div className="ops-kpi-value">{Math.round(data.fieldHrs).toLocaleString()}</div>
+        </div>
+        <div className="ops-kpi">
+          <div className="ops-kpi-label">Revenue / field hr</div>
+          <div className="ops-kpi-value">{data.fieldHrs > 0 ? fmt(data.revPerFieldHr) : '—'}</div>
+          <div className="ops-small ops-text-dim">
+            GP / field hr: {data.fieldHrs > 0 ? fmt(data.gpPerFieldHr) : '—'}
+          </div>
+        </div>
+      </div>
+      {data.productivityPct != null && (
+        <div className="ops-small ops-text-dim" style={{ marginTop: 8 }}>
+          Earned-value productivity: <strong>{Math.round(data.productivityPct)}%</strong>
+          {' '}(earned ${fmtK(data.earned)} on direct cost ${fmtK(data.directCost)})
+        </div>
       )}
-    </>
-  )
-}
-
-// ── Service-job row ──────────────────────────────────────────────
-function ServiceJobRow({ job, expanded, onToggle, fmtCell, columns }) {
-  const chipCls = job.status === 'Closed' ? 'closed' : job.status === 'Hold' ? 'hold' : 'active'
-  return (
-    <>
-      <tr className="clickable" onClick={onToggle}>
-        <td className="ops-text-dim ops-small" style={{ width: 24 }}>{expanded ? '▾' : '▸'}</td>
-        {columns.map((c) => (
-          <td key={c.key} className={c.align === 'right' ? 'right' : ''}>
-            {c.key === 'status'
-              ? <span className={`chip ${chipCls}`}>{job.status}</span>
-              : fmtCell(job, c)}
-          </td>
-        ))}
-      </tr>
-      {expanded && (
-        <tr>
-          <td colSpan={columns.length + 1} className="ops-row-expand">
-            <div style={{ fontWeight: 700, color: 'var(--white)', marginBottom: 6 }}>
-              {job.name} · work orders
-            </div>
-            {job.workOrders.length === 0 ? (
-              <div className="ops-small ops-text-dim">No work orders on file.</div>
-            ) : (
-              <table className="ops-table" style={{ fontSize: '0.82rem' }}>
-                <thead>
-                  <tr>
-                    <th>WO #</th>
-                    <th>Opened</th>
-                    <th>Closed</th>
-                    <th>Description</th>
-                    <th className="right">Hours</th>
-                    <th className="right">Rate</th>
-                    <th className="right">Billed</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {job.workOrders.map((w) => (
-                    <tr key={w.wo}>
-                      <td>{w.wo}</td>
-                      <td className="ops-text-dim">{w.opened}</td>
-                      <td className="ops-text-dim">{w.closed || '—'}</td>
-                      <td>{w.description}</td>
-                      <td className="right">{w.hours}</td>
-                      <td className="right">${w.rate}</td>
-                      <td className="right">{fmt(w.billed)}</td>
-                      <td><span className={`chip ${w.status === 'invoiced' ? 'closed' : 'active'}`}>{w.status}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </td>
-        </tr>
-      )}
-    </>
+    </OpsSectionCard>
   )
 }
