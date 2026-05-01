@@ -1,19 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import OpsSectionCard from '../../components/ops/OpsSectionCard'
-import { useOpsData } from '../../hooks/useOpsData'
-import { useAuth } from '../../context/AuthContext'
-
-// Permissions tab — Don's directive:
-//   "it should read based on the admin > permissions and see who has
-//    permissions to see that tab. Those people should all be listed
-//    on the dashboard permissions tab."
-//
-// We back this with ops.dashboard_users, which is auto-projected from
-// public.employees (the same table the OpsRoute guard checks).  Anyone
-// with is_admin = TRUE or job_grade = 'Owner' shows up here.
-//
-// Empty-state UI: if no users come back (deploy hasn't applied the
-// patch yet, or no admins/owners exist) we tell the user how to fix it.
+import { supabase } from '../../lib/supabase'
 
 const ALL_TABS = [
   { id: 'overview', label: 'Overview' },
@@ -28,195 +15,250 @@ const ALL_TABS = [
 ]
 
 const ALL_FIELDS = [
-  // Headline financial numbers
-  { id: 'revenue_dollar',     label: 'Hide Revenue $' },
-  { id: 'gp_dollar',          label: 'Hide GP $' },
-  { id: 'gp_percent',         label: 'Hide GP %' },
-  { id: 'direct_cost',        label: 'Hide Direct Cost $' },
-  { id: 'contract_amount',    label: 'Hide Contract amount' },
-  { id: 'bank_balance',       label: 'Hide Bank balances' },
-  { id: 'overhead_net',       label: 'Hide Overhead + Net Profit' },
-  // Cost bucket breakdown
-  { id: 'cost_buckets',       label: 'Hide Cost bucket split' },
-  { id: 'labor_hours',        label: 'Hide Labor hours' },
-  // Productivity / earned value
-  { id: 'productivity',       label: 'Hide Productivity / earned-value' },
-  { id: 'rev_per_field_hr',   label: 'Hide Revenue per field hour' },
-  // Retainage
-  { id: 'retainage_held',     label: 'Hide Retainage held' },
-  { id: 'retainage_due',      label: 'Hide Retainage due schedule' },
-  // A/R
-  { id: 'aging_90',           label: 'Hide 90+ aging' },
-  { id: 'ar_email',           label: 'Hide Weekly A/R email settings' },
-  // POs / work orders
-  { id: 'po_list',            label: 'Hide PO list' },
-  { id: 'po_outstanding',     label: 'Hide PO outstanding $' },
-  { id: 'work_orders',        label: 'Hide Service work-orders' },
-  // Payroll
-  { id: 'payroll_detail',     label: 'Hide Payroll register detail' },
-  { id: 'payroll_rates',      label: 'Hide Employee pay rates' },
-  // KPIs
-  { id: 'kpi_values',         label: 'Hide KPI values' },
+  { id: 'revenue_dollar',     label: 'Revenue $' },
+  { id: 'gp_dollar',          label: 'GP $' },
+  { id: 'gp_percent',         label: 'GP %' },
+  { id: 'direct_cost',        label: 'Direct Cost $' },
+  { id: 'contract_amount',    label: 'Contract amount' },
+  { id: 'bank_balance',       label: 'Bank balances' },
+  { id: 'overhead_net',       label: 'Overhead + Net Profit' },
+  { id: 'cost_buckets',       label: 'Cost bucket split' },
+  { id: 'labor_hours',        label: 'Labor hours' },
+  { id: 'productivity',       label: 'Productivity / earned-value' },
+  { id: 'rev_per_field_hr',   label: 'Revenue per field hour' },
+  { id: 'retainage_held',     label: 'Retainage held' },
+  { id: 'retainage_due',      label: 'Retainage due schedule' },
+  { id: 'aging_90',           label: '90+ aging' },
+  { id: 'ar_email',           label: 'Weekly A/R email settings' },
+  { id: 'po_list',            label: 'PO list' },
+  { id: 'po_outstanding',     label: 'PO outstanding $' },
+  { id: 'work_orders',        label: 'Service work-orders' },
+  { id: 'payroll_detail',     label: 'Payroll register detail' },
+  { id: 'payroll_rates',      label: 'Employee pay rates' },
+  { id: 'kpi_values',         label: 'KPI values' },
 ]
 
 export default function OpsPermissionsPage() {
-  const { permUsers, refresh } = useOpsData()
-  const { currentUser } = useAuth()
-  const isAdmin = Boolean(currentUser?.is_admin)
+  const [execUsers, setExecUsers]   = useState([])  // employees with dashboard access on
+  const [permMap,   setPermMap]     = useState({})   // empId -> ops perm object
+  const [selected,  setSelected]    = useState('')
+  const [loading,   setLoading]     = useState(true)
+  const [saving,    setSaving]      = useState(false)
+  const [msg,       setMsg]         = useState(null)
 
-  // Local working copy keyed by sparksId.  Re-seeded whenever
-  // permUsers changes (e.g. after Sync now / refresh).
-  const [local, setLocal] = useState({})
-  const [selected, setSelected] = useState('')
+  const showMsg = (text, type = 'success') => {
+    setMsg({ text, type })
+    setTimeout(() => setMsg(null), 4000)
+  }
 
-  useEffect(() => {
-    const next = Object.fromEntries(
-      (permUsers || []).map((u) => [u.sparksId, { ...u }]),
-    )
-    setLocal(next)
-    setSelected((prev) => (prev && next[prev]) ? prev : (permUsers?.[0]?.sparksId ?? ''))
-  }, [permUsers])
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
 
-  const user = local[selected]
+    // ── 1. Get all employees (base fields only — avoids schema cache issues) ──
+    const { data: emps } = await supabase
+      .from('employees')
+      .select('id,first_name,last_name,email,job_grade')
+      .eq('is_admin', false)
+      .eq('is_archived', false)
+      .order('last_name')
+
+    // ── 2. Get user_permissions to find who has dashboard visible = true ──────
+    const { data: userPerms } = await supabase
+      .from('user_permissions')
+      .select('employee_id,permissions')
+
+    // ── 3. Get existing ops_permissions rows ──────────────────────────────────
+    const { data: opsPerms } = await supabase
+      .from('ops_permissions')
+      .select('*')
+
+    // Build ops perm map
+    const map = {}
+    ;(opsPerms || []).forEach(p => {
+      map[p.employee_id] = {
+        role:           p.role || 'viewer',
+        pcs:            p.pcs || [],
+        hiddenTabs:     p.hidden_tabs || ALL_TABS.map(t => t.id),
+        hiddenFields:   p.hidden_fields || ALL_FIELDS.map(f => f.id),
+        jobAccess:      p.job_access || 'assigned',
+        jobAccessList:  p.job_access_list || [],
+      }
+    })
+    setPermMap(map)
+
+    // Determine which employees have dashboard screen enabled in user_permissions
+    const dashboardEmpIds = new Set()
+    ;(userPerms || []).forEach(row => {
+      try {
+        const parsed = JSON.parse(row.permissions)
+        if (parsed?.screens?.dashboard?.visible === true) {
+          dashboardEmpIds.add(row.employee_id)
+        }
+      } catch {}
+    })
+
+    // Also include anyone who already has an ops_permissions row (legacy / manually added)
+    ;(opsPerms || []).forEach(p => dashboardEmpIds.add(p.employee_id))
+
+    const withAccess = (emps || []).filter(e => dashboardEmpIds.has(e.id))
+    setExecUsers(withAccess)
+
+    // Auto-select first user if none selected
+    if (!selected && withAccess.length > 0) setSelected(withAccess[0].id)
+
+    setLoading(false)
+  }, [selected])
+
+  useEffect(() => { fetchAll() }, [])   // only run on mount
+
+  const currentPerms = permMap[selected] || {
+    role: 'viewer', pcs: [],
+    hiddenTabs:    ALL_TABS.map(t => t.id),
+    hiddenFields:  ALL_FIELDS.map(f => f.id),
+    jobAccess: 'assigned', jobAccessList: [],
+  }
 
   const update = (patch) =>
-    setLocal((prev) => ({ ...prev, [selected]: { ...prev[selected], ...patch } }))
+    setPermMap(prev => ({ ...prev, [selected]: { ...(prev[selected] || {}), ...patch } }))
 
   const toggleTab = (tabId) => {
-    if (!user) return
-    const hidden = user.hiddenTabs.includes(tabId)
+    const hidden = (currentPerms.hiddenTabs || []).includes(tabId)
     update({
       hiddenTabs: hidden
-        ? user.hiddenTabs.filter((t) => t !== tabId)
-        : [...user.hiddenTabs, tabId],
+        ? (currentPerms.hiddenTabs || []).filter(t => t !== tabId)
+        : [...(currentPerms.hiddenTabs || []), tabId],
     })
   }
+
   const toggleField = (fid) => {
-    if (!user) return
-    const hidden = user.hiddenFields.includes(fid)
+    const hidden = (currentPerms.hiddenFields || []).includes(fid)
     update({
       hiddenFields: hidden
-        ? user.hiddenFields.filter((f) => f !== fid)
-        : [...user.hiddenFields, fid],
+        ? (currentPerms.hiddenFields || []).filter(f => f !== fid)
+        : [...(currentPerms.hiddenFields || []), fid],
     })
   }
 
-  // ── Empty state — no users came back from ops.dashboard_users ──
-  if (!permUsers || permUsers.length === 0) {
-    return (
-      <OpsSectionCard
-        title="Permissions"
-        subtitle="Auto-listed from Sparks portal admins and owners."
-      >
-        <div style={{ padding: '20px 4px' }}>
-          <div className="ops-text-dim" style={{ marginBottom: 8 }}>
-            No users have access to the ops dashboard yet.
-          </div>
-          <div className="ops-small ops-text-dim">
-            This list is auto-built from the Sparks portal's admin / Owner roster.
-            If someone should appear here, set them to <strong>admin</strong> or
-            <strong>&nbsp;Owner</strong> in <em>Admin → Permissions</em> on the main portal.
-          </div>
-          <button
-            className="btn btn-outline btn-sm"
-            style={{ marginTop: 12 }}
-            onClick={() => refresh && refresh()}
-          >
-            Refresh
-          </button>
-        </div>
-      </OpsSectionCard>
-    )
+  const savePerms = async () => {
+    if (!selected) return
+    setSaving(true)
+    const { error } = await supabase.from('ops_permissions').upsert({
+      employee_id:    selected,
+      role:           currentPerms.role || 'viewer',
+      pcs:            currentPerms.pcs || [],
+      hidden_tabs:    currentPerms.hiddenTabs || [],
+      hidden_fields:  currentPerms.hiddenFields || [],
+      job_access:     currentPerms.jobAccess || 'assigned',
+      job_access_list: currentPerms.jobAccessList || [],
+      updated_at:     new Date().toISOString(),
+    }, { onConflict: 'employee_id' })
+    setSaving(false)
+    if (error) showMsg('Save failed: ' + error.message, 'error')
+    else showMsg('Permissions saved')
   }
 
+  const selectedEmp = execUsers.find(e => e.id === selected)
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 16 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 16 }}>
+
+      {/* ── User list ── */}
       <div className="ops-userlist">
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-bright)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--gold)' }}>Users</div>
-            <div className="ops-small ops-text-dim">Auto-listed from admins + Owners</div>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-bright)' }}>
+          <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--gold)' }}>Exec Dashboard</div>
+          <div className="ops-small ops-text-dim">{execUsers.length} user{execUsers.length !== 1 ? 's' : ''}</div>
+          <div className="ops-small ops-text-dim" style={{ marginTop: 4, fontSize: '0.7rem' }}>
+            Populated from Admin → User Permissions (Dashboard tab on)
           </div>
-          <button className="btn btn-outline btn-xs" onClick={() => refresh && refresh()}>
-            Refresh
-          </button>
         </div>
-        {Object.values(local).map((u) => (
-          <button
-            key={u.sparksId}
-            onClick={() => setSelected(u.sparksId)}
-            className={selected === u.sparksId ? 'active' : ''}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div className="name">{u.name || u.email}</div>
-                <div className="meta">{u.email}</div>
+
+        {loading ? (
+          <div style={{ padding: 16, color: 'var(--text-dim)', fontSize: '0.82rem' }}>Loading…</div>
+        ) : execUsers.length === 0 ? (
+          <div style={{ padding: 16, color: 'var(--text-dim)', fontSize: '0.82rem' }}>
+            No employees have Dashboard access enabled. Go to Admin → Permissions and turn on the Dashboard tab for the relevant employees.
+          </div>
+        ) : execUsers.map(u => (
+          <button key={u.id} onClick={() => setSelected(u.id)}
+            className={selected === u.id ? 'active' : ''}
+            style={{ width: '100%', textAlign: 'left' }}>
+            <div>
+              <div className="name">{u.first_name} {u.last_name}</div>
+              <div className="meta ops-text-dim">{u.email}</div>
+              <div className="meta" style={{ color: 'var(--gold-dark)', marginTop: 2 }}>
+                {permMap[u.id]?.role || 'viewer'}
+                {!permMap[u.id] && <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.7rem' }}> — no ops perms yet</span>}
               </div>
-              <div className="role">{u.role}</div>
             </div>
           </button>
         ))}
       </div>
 
+      {/* ── Permissions panel ── */}
       <div>
-        {user ? (
+        {msg && (
+          <div style={{
+            marginBottom: 14, padding: '10px 14px', borderRadius: 8, fontSize: '0.85rem',
+            background: msg.type === 'error' ? 'rgba(224,85,85,0.12)' : 'rgba(94,232,138,0.1)',
+            border: `1px solid ${msg.type === 'error' ? 'rgba(224,85,85,0.4)' : 'rgba(94,232,138,0.3)'}`,
+            color: msg.type === 'error' ? '#ff8a8a' : 'var(--green-bright)',
+          }}>
+            {msg.text}
+          </div>
+        )}
+
+        {selectedEmp ? (
           <>
             <OpsSectionCard
-              title={user.name || user.email}
-              subtitle={`${user.email} · role: ${user.role}`}
+              title={`${selectedEmp.first_name} ${selectedEmp.last_name}`}
+              subtitle={`${selectedEmp.email}${selectedEmp.job_grade ? ` · ${selectedEmp.job_grade}` : ''}`}
               right={
-                !isAdmin ? (
-                  <span className="ops-small ops-text-dim">Read-only — admin to edit</span>
-                ) : null
-              }
-            >
-              <div>
-                <div className="ops-stat-lbl" style={{ marginBottom: 8 }}>Profit-center scoping</div>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  {['DDE', 'DCM', 'SILK'].map((pc) => (
-                    <label key={pc} className="ops-checkbox">
-                      <input
-                        type="checkbox"
-                        disabled={!isAdmin}
-                        checked={user.pcs.includes(pc)}
-                        onChange={() => {
-                          const on = user.pcs.includes(pc)
-                          update({ pcs: on ? user.pcs.filter((p) => p !== pc) : [...user.pcs, pc] })
-                        }}
-                      />
-                      {pc}
-                    </label>
+                <select className="ops-select" value={currentPerms.role || 'viewer'}
+                  onChange={e => update({ role: e.target.value })}>
+                  {['admin','owner','manager','pm','finance','accountant','payroll','foreman','viewer'].map(r => (
+                    <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>
                   ))}
-                </div>
+                </select>
+              }>
+              <div style={{ padding: '8px 12px', borderRadius: 6, background: 'rgba(240,192,64,0.07)', border: '1px solid rgba(240,192,64,0.2)', fontSize: '0.8rem', color: 'var(--white-dim)', marginBottom: 12 }}>
+                All permissions are <strong style={{ color: 'var(--white-soft)' }}>denied by default</strong>. Check boxes below to grant access.
+              </div>
+              <div className="ops-stat-lbl" style={{ marginBottom: 8 }}>Profit-center scoping</div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                {['DDE','DCM','SILK'].map(pc => (
+                  <label key={pc} className="ops-checkbox">
+                    <input type="checkbox"
+                      checked={(currentPerms.pcs || []).includes(pc)}
+                      onChange={() => {
+                        const on = (currentPerms.pcs || []).includes(pc)
+                        update({ pcs: on ? (currentPerms.pcs || []).filter(p => p !== pc) : [...(currentPerms.pcs || []), pc] })
+                      }} />
+                    {pc}
+                  </label>
+                ))}
               </div>
             </OpsSectionCard>
 
-            <OpsSectionCard title="Tab visibility" subtitle="Uncheck any tab to hide it for this user.">
+            <OpsSectionCard title="Tab access" subtitle="Check to GRANT access. All tabs are hidden by default.">
               <div className="ops-grid-4">
-                {ALL_TABS.map((t) => (
+                {ALL_TABS.map(t => (
                   <label key={t.id} className="ops-checkbox">
-                    <input
-                      type="checkbox"
-                      disabled={!isAdmin}
-                      checked={!user.hiddenTabs.includes(t.id)}
-                      onChange={() => toggleTab(t.id)}
-                    />
+                    <input type="checkbox"
+                      checked={!(currentPerms.hiddenTabs || ALL_TABS.map(x => x.id)).includes(t.id)}
+                      onChange={() => toggleTab(t.id)} />
                     {t.label}
                   </label>
                 ))}
               </div>
             </OpsSectionCard>
 
-            <OpsSectionCard title="Field masking" subtitle="Toggle to redact specific numbers even on visible tabs.">
+            <OpsSectionCard title="Field visibility" subtitle="Check to SHOW each data field. All are hidden by default.">
               <div className="ops-grid-2">
-                {ALL_FIELDS.map((f) => (
+                {ALL_FIELDS.map(f => (
                   <label key={f.id} className="ops-checkbox">
-                    <input
-                      type="checkbox"
-                      disabled={!isAdmin}
-                      checked={user.hiddenFields.includes(f.id)}
-                      onChange={() => toggleField(f.id)}
-                    />
+                    <input type="checkbox"
+                      checked={!(currentPerms.hiddenFields || ALL_FIELDS.map(x => x.id)).includes(f.id)}
+                      onChange={() => toggleField(f.id)} />
                     {f.label}
                   </label>
                 ))}
@@ -230,40 +272,37 @@ export default function OpsPermissionsPage() {
                   { id: 'assigned',  label: "Only jobs where they're listed as PM/lead" },
                   { id: 'whitelist', label: 'Whitelist specific jobs' },
                   { id: 'blacklist', label: 'All jobs except a blacklist' },
-                ].map((o) => (
-                  <label key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: isAdmin ? 'pointer' : 'not-allowed' }}>
-                    <input
-                      type="radio"
-                      name="jobAccess"
-                      disabled={!isAdmin}
-                      checked={user.jobAccess === o.id}
-                      onChange={() => update({ jobAccess: o.id })}
-                    />
+                ].map(o => (
+                  <label key={o.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                    <input type="radio" name="jobAccess"
+                      checked={(currentPerms.jobAccess || 'assigned') === o.id}
+                      onChange={() => update({ jobAccess: o.id })} />
                     <span>{o.label}</span>
                   </label>
                 ))}
               </div>
-              {(user.jobAccess === 'whitelist' || user.jobAccess === 'blacklist') && (
-                <input
-                  className="ops-input"
-                  disabled={!isAdmin}
-                  value={(user.jobAccessList ?? []).join(', ')}
-                  onChange={(e) => update({ jobAccessList: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
-                  placeholder="Job numbers, comma-separated (e.g. 2430, 2512)"
-                  style={{ marginTop: 12, width: '100%' }}
-                />
+              {(currentPerms.jobAccess === 'whitelist' || currentPerms.jobAccess === 'blacklist') && (
+                <input className="ops-input"
+                  value={(currentPerms.jobAccessList || []).join(', ')}
+                  onChange={e => update({ jobAccessList: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                  placeholder="Job numbers, comma-separated"
+                  style={{ marginTop: 12, width: '100%' }} />
               )}
             </OpsSectionCard>
 
-            {isAdmin && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-                <button className="btn btn-outline btn-sm">Discard</button>
-                <button className="btn btn-gold btn-sm">Save changes</button>
-              </div>
-            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+              <button className="btn btn-outline btn-sm" onClick={() => fetchAll()}>Discard</button>
+              <button className="btn btn-gold btn-sm" onClick={savePerms} disabled={saving}>
+                {saving ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
           </>
         ) : (
-          <div className="ops-text-dim">Select a user.</div>
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-dim)' }}>
+            {loading ? 'Loading…' : execUsers.length === 0
+              ? 'No employees have Dashboard access. Enable it in Admin → User Permissions first.'
+              : 'Select a user from the left.'}
+          </div>
         )}
       </div>
     </div>
