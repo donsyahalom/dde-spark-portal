@@ -1115,7 +1115,6 @@ export default function OpsJobsPage() {
             </tbody>
           </table>
         </div>
-        </div>
       </OpsSectionCard>
     </div>
   )
