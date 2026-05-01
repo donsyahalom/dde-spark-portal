@@ -952,9 +952,10 @@ export default function OpsJobsPage() {
           </div>
         }
       >
-        {/* Scroll wrapper — width:max-content makes table self-size, scroll kicks in naturally */}
-        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          <table className="ops-table" style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse' }}>
+        {/* ops-table-scroll-wrap overrides .ops-table width:100% → width:max-content
+             so columns never squish and the div scrolls horizontally when needed */}
+        <div className="ops-table-scroll-wrap">
+          <table className="ops-table">
             <thead>
               <tr>
                 <th style={{ width: 28 }} />
