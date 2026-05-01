@@ -160,7 +160,7 @@ function groupByName(jobs) {
     const key = j.name.trim().toLowerCase()
     if (!nameMap.has(key)) {
       // First occurrence: clone, store primary num for PO/WO lookup
-      nameMap.set(key, { ...j, _primaryNum: j.num, _allNums: [j.num], _grouped: [j] })
+      nameMap.set(key, { ...j, _primaryNum: j.num, _allNums: [j.jobNum || j.num], _grouped: [j] })
     } else {
       const e = nameMap.get(key)
       // Accumulate numeric fields
@@ -178,7 +178,7 @@ function groupByName(jobs) {
       e.productivity = (e.budgetLaborHrs > 0 && e.pctCmp > 0 && e.actualLaborHrs > 0)
         ? +((e.budgetLaborHrs * (e.pctCmp / 100)) / e.actualLaborHrs).toFixed(2)
         : null
-      e._allNums.push(j.num)
+      e._allNums.push(j.jobNum || j.num)
       e._grouped.push(j)
     }
   }
