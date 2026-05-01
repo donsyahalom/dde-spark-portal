@@ -471,7 +471,7 @@ function ContractJobRow({ job, purchaseOrders, workOrders, expanded, onToggle,
     )
   }
 
-  const chipCls = job.status === 'Closed' ? 'closed' : job.status === 'Hold' ? 'hold' : 'active'
+  const chipCls = job.status === 'Closed' ? 'closed' : ['Hold','Bid','Contract'].includes(job.status) ? 'hold' : job.status === 'Complete' ? 'closed' : 'active'
   const dates   = jobDates(job)
 
   return (
@@ -627,7 +627,7 @@ function ContractJobRow({ job, purchaseOrders, workOrders, expanded, onToggle,
 // Service job row  — no hooks needed (no charts)
 // ─────────────────────────────────────────────────────────────────────
 function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, onReclassify, onClose, isAdmin }) {
-  const chipCls = job.status === 'Closed' ? 'closed' : job.status === 'Hold' ? 'hold' : 'active'
+  const chipCls = job.status === 'Closed' ? 'closed' : ['Hold','Bid','Contract'].includes(job.status) ? 'hold' : job.status === 'Complete' ? 'closed' : 'active'
   const dates   = jobDates(job)
 
   // Gather all WOs for the (possibly grouped) job
@@ -976,7 +976,9 @@ export default function OpsJobsPage() {
             <select className="ops-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="all">All statuses</option>
               <option value="Active">Active</option>
-              <option value="Hold">On hold</option>
+              <option value="Complete">Complete</option>
+              <option value="Contract">Contract</option>
+              <option value="Bid">Bid</option>
               <option value="Closed">Closed</option>
             </select>
           </div>
