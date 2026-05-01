@@ -130,8 +130,10 @@
 /* Tables — tuned to sit inside an .ops-card without double borders */
 .ops-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 /* Scrollable variant — table grows to natural width, parent scrolls */
-.ops-table-scroll-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.ops-table-scroll-wrap { overflow-x: auto; overflow-y: visible; -webkit-overflow-scrolling: touch; }
 .ops-table-scroll-wrap .ops-table { width: max-content; min-width: 100%; }
+/* Sticky header rows need the scroll container to not set overflow-y */
+.ops-table-scroll-wrap thead th { position: sticky; top: 0; z-index: 3; }
 .ops-table thead tr { background: rgba(0,0,0,0.3); }
 .ops-table th {
   font-family: var(--font-display); font-size: 0.66rem; letter-spacing: 0.1em;
