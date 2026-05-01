@@ -3,6 +3,7 @@ import OpsSectionCard from '../../components/ops/OpsSectionCard'
 import OpsPaymentHistory from '../../components/ops/OpsPaymentHistory'
 import { useOpsData } from '../../hooks/useOpsData'
 import { useAuth } from '../../context/AuthContext'
+import { useOpsViewState } from '../../context/OpsViewStateContext'
 import { fmt, fmtK } from '../../lib/opsFormat'
 import {
   DAYS_BUCKETS,
@@ -191,6 +192,7 @@ function AgingTable({ title, rows, bucketLabels, retainageByCust, emptyMsg }) {
 export default function OpsArPage() {
   const { arInvoices, arEmailDefaults, jobs } = useOpsData()
   const { currentUser } = useAuth()
+  const { applyJobTypeOverrides } = useOpsViewState()
   const isAdmin = !!currentUser?.is_admin
   const [settings, setSettings] = useState(() => loadSettings(arEmailDefaults))
   const [showPreview, setShowPreview] = useState(false)
@@ -199,10 +201,32 @@ export default function OpsArPage() {
   // Email section is collapsed by default — admins can expand it.
   const [emailOpen, setEmailOpen] = useState(false)
 
-  // Split invoices AR vs SR so the two aging reports + two invoice lists
-  // can be rendered independently (matches the email layout too).
-  const arInv = useMemo(() => arInvoices.filter((i) => i.type === 'AR'), [arInvoices])
-  const srInv = useMemo(() => arInvoices.filter((i) => i.type === 'SR'), [arInvoices])
+  // Build a map of job# → effective type (respecting user overrides).
+  // When a job has been moved (e.g. contract → service), its invoices
+  // should appear in the SR aging table instead of the AR table.
+  const effectiveJobs = useMemo(() => applyJobTypeOverrides(jobs), [jobs, applyJobTypeOverrides])
+  const jobTypeMap = useMemo(() => {
+    const m = {}
+    for (const j of effectiveJobs) m[j.num] = j.type   // 'contract' | 'service'
+    return m
+  }, [effectiveJobs])
+
+  // Re-route invoices: if a job has been moved from Contract→Service
+  // or vice versa, treat its invoices as the new type so the aging
+  // tables reflect the current classification.
+  const routedInvoices = useMemo(() =>
+    arInvoices.map((inv) => {
+      const effectiveType = jobTypeMap[inv.job]
+      if (!effectiveType) return inv
+      const newType = effectiveType === 'contract' ? 'AR' : 'SR'
+      return newType !== inv.type ? { ...inv, type: newType, _rerouted: true } : inv
+    }),
+    [arInvoices, jobTypeMap],
+  )
+
+  // Split invoices AR vs SR.
+  const arInv = useMemo(() => routedInvoices.filter((i) => i.type === 'AR'), [routedInvoices])
+  const srInv = useMemo(() => routedInvoices.filter((i) => i.type === 'SR'), [routedInvoices])
 
   // Rebuild aging rollups whenever the toggle flips.
   const arAging = useMemo(
@@ -227,26 +251,26 @@ export default function OpsArPage() {
   // Only used for the Contract (AR) table.
   const retainageByCust = useMemo(() => {
     const m = {}
-    for (const j of jobs) {
+    for (const j of effectiveJobs) {
       if (j.type !== 'contract' || !j.retainageHeld) continue
       m[j.customer] = (m[j.customer] || 0) + j.retainageHeld
     }
     return m
-  }, [jobs])
+  }, [effectiveJobs])
 
   // Top-row quick cards — always use days buckets so the "aging at a
   // glance" read stays interpretable regardless of the toggle.
   const totals = useMemo(() => {
     const sums = DAYS_BUCKETS.map(() => 0)
     let total = 0
-    for (const inv of arInvoices) {
+    for (const inv of routedInvoices) {
       const dl = daysLateOf(inv)
       const bi = DAYS_BUCKETS.findIndex((b) => dl >= b.min && dl <= b.max)
       if (bi >= 0) sums[bi] += inv.balance
       total += inv.balance
     }
     return { sums, total }
-  }, [arInvoices])
+  }, [routedInvoices])
 
   const persist = (next) => {
     setSettings(next)
@@ -282,12 +306,12 @@ export default function OpsArPage() {
 </table></body></html>`
     }
     return buildArEmailHtml({
-      invoices: arInvoices,
-      jobs,
+      invoices: routedInvoices,
+      jobs: effectiveJobs,
       subject: settings.subject,
       content: settings.content || {},
     })
-  }, [arInvoices, jobs, settings.subject, settings.content, settings.deliveryMode])
+  }, [routedInvoices, effectiveJobs, settings.subject, settings.content, settings.deliveryMode])
 
   return (
     <div>
@@ -543,12 +567,17 @@ export default function OpsArPage() {
               </tr>
             </thead>
             <tbody>
-              {arInvoices.map((r) => {
+              {routedInvoices.map((r) => {
                 const dl = daysLateOf(r)
                 const ageCls = dl > 90 ? 'ops-text-neg' : dl > 60 ? 'ops-text-warn' : ''
                 return (
                   <tr key={r.invoice}>
-                    <td><span className={`chip ${r.type === 'AR' ? 'active' : 'hold'}`}>{r.type}</span></td>
+                    <td>
+                      <span className={`chip ${r.type === 'AR' ? 'active' : 'hold'}`}>{r.type}</span>
+                      {r._rerouted && (
+                        <span title="Rerouted — job was reclassified on Jobs P&L page" style={{ marginLeft: 4, fontSize: '0.7rem', color: 'var(--gold)', opacity: 0.8 }}>↺</span>
+                      )}
+                    </td>
                     <td>{r.invoice}</td>
                     <td>{r.customer}</td>
                     <td className="ops-text-dim">{r.job}</td>

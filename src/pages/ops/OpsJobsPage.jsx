@@ -8,40 +8,34 @@ import {
   jobProductivity,
   companyProductivity,
 } from '../../hooks/useOpsData'
+import { useOpsViewState } from '../../context/OpsViewStateContext'
 import { fmt, fmtK, pct } from '../../lib/opsFormat'
 import { moneyLineOpts, PALETTE } from '../../lib/opsChartOpts'
 
-// Contract-job table columns.  `gpDol`, `gpPct`, `subPct`, `directCost`
-// come from enrichJob().  `productivity` is computed per-row.
-//
-// Each column carries an inline `tooltip` describing the calculation /
-// source so the field crew can see at a glance how a number was derived.
-// The tooltip renders on hover via the native browser title attribute
-// AND a small ⓘ icon next to the header label so it's discoverable.
+// Contract-job table columns.
 const CONTRACT_COLUMNS = [
   { key: 'num',          label: 'Job #',        type: 'str',
     tooltip: 'Sage short_name for the job, used as the public job number.' },
   { key: 'name',         label: 'Name',         type: 'str',
     tooltip: 'Sage job name (sage.jobs.job_name).' },
   { key: 'contract',     label: 'Contract',     type: 'money', align: 'right',
-    tooltip: 'Original contract amount (sage.jobs.contract_amount). Does not include change orders unless they have been booked into the contract.' },
+    tooltip: 'Original contract amount (sage.jobs.contract_amount).' },
   { key: 'revenue',      label: 'Revenue',      type: 'money', align: 'right',
     tooltip: 'Sum of all AR invoice totals booked to this job (billed-to-date).' },
   { key: 'directCost',   label: 'Direct Cost',  type: 'money', align: 'right',
-    tooltip: 'Labor + Material + Subs + Equipment + Bonds + Permits + Other, summed from sage.job_cost_transactions. Bonds and Permits are 0 today (no distinct cost-type in Sage v27).' },
+    tooltip: 'Labor + Material + Subs + Equipment + Bonds + Permits + Other.' },
   { key: 'gpDol',        label: 'GP $',         type: 'money', align: 'right',
     tooltip: 'Gross Profit = Revenue − Direct Cost.' },
   { key: 'gpPct',        label: 'GP %',         type: 'pct',   align: 'right',
     tooltip: 'Gross Profit % = (GP $ ÷ Revenue) × 100.' },
   { key: 'pctCmp',       label: '% Cmp',        type: 'pct',   align: 'right',
-    tooltip: 'Manual override from sage.jobs.percent_complete if a PM has set it. Otherwise computed: (cost-to-date ÷ total budget) × 100, capped at 100%. Returns 0 if no budget on file.' },
+    tooltip: 'Manual override from sage.jobs.percent_complete if a PM has set it. Otherwise computed: (cost-to-date ÷ total budget) × 100.' },
   { key: 'productivity', label: 'Productivity', type: 'prod',  align: 'right',
-    tooltip: 'Earned-value productivity = (budget hrs × % complete) ÷ actual hrs. 1.00 = on plan, >1.00 ahead, <1.00 behind. Shows — when there are no budgeted labor hours.' },
+    tooltip: 'Earned-value productivity = (budget hrs × % complete) ÷ actual hrs. 1.00 = on plan.' },
   { key: 'status',       label: 'Status',       type: 'str',
-    tooltip: 'Active, On Hold, or Closed. Mapped from sage.jobs.status: 0,1=Active, 2=Hold, 3,4=Closed.' },
+    tooltip: 'Active, On Hold, or Closed.' },
 ]
 
-// Service-job table (T&M) — different metrics.
 const SERVICE_COLUMNS = [
   { key: 'num',       label: 'Job #',        type: 'str',
     tooltip: 'Sage short_name for the service job.' },
@@ -61,7 +55,6 @@ const SERVICE_COLUMNS = [
     tooltip: 'Active, On Hold, or Closed.' },
 ]
 
-// ── Cost-bucket metadata ──
 const COST_BUCKETS = [
   { key: 'labor',     label: 'Labor',     color: PALETTE.blue },
   { key: 'material',  label: 'Material',  color: PALETTE.amber },
@@ -78,9 +71,6 @@ function fmtProductivity(p) {
   return <span className={cls}>{p.toFixed(2)}</span>
 }
 
-// Renders a column-header cell with the label + an info icon.  The
-// native title attribute gives the hover tooltip; the icon makes the
-// presence of help text visible without any JS or CSS additions.
 function ColumnHeader({ col, sortKey, sortDir, onClick }) {
   const arrow = sortKey === col.key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
   return (
@@ -112,8 +102,203 @@ function ColumnHeader({ col, sortKey, sortDir, onClick }) {
   )
 }
 
+// ── Type-reclassification pill ────────────────────────────────────────
+// Small inline control rendered next to job name in the expanded row.
+// Allows the user to move a job between Contract and Service.  The
+// change persists across sessions via OpsViewStateContext → localStorage.
+function JobTypeToggle({ job, currentType, onToggle }) {
+  const target = currentType === 'contract' ? 'service' : 'contract'
+  const isOverridden = !!job._typeOverridden
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+      <span className="ops-small ops-text-dim">
+        Classified as:
+      </span>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '3px 10px',
+          borderRadius: 20,
+          fontSize: '0.78rem',
+          fontWeight: 700,
+          background: currentType === 'contract'
+            ? 'rgba(111,168,255,0.18)'
+            : 'rgba(240,192,64,0.18)',
+          border: `1px solid ${currentType === 'contract' ? 'rgba(111,168,255,0.5)' : 'rgba(240,192,64,0.5)'}`,
+          color: currentType === 'contract' ? PALETTE.blue : PALETTE.amber,
+        }}
+      >
+        {currentType === 'contract' ? 'Contract' : 'Service'}
+        {isOverridden && (
+          <span style={{ fontSize: '0.7rem', opacity: 0.7, fontWeight: 400 }}>
+            (overridden)
+          </span>
+        )}
+      </span>
+      <button
+        className="ops-btn ghost"
+        style={{ padding: '3px 10px', fontSize: '0.78rem' }}
+        title={`Move to ${target} — affects Jobs P&L and A/R reports`}
+        onClick={(e) => { e.stopPropagation(); onToggle(job.num, target) }}
+      >
+        → Move to {target === 'contract' ? 'Contract' : 'Service'}
+      </button>
+      {isOverridden && (
+        <button
+          className="ops-btn ghost"
+          style={{ padding: '3px 8px', fontSize: '0.75rem', opacity: 0.7 }}
+          title="Restore original Sage classification"
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggle(job.num, job._originalType || (currentType === 'contract' ? 'service' : 'contract'))
+          }}
+        >
+          ↺ Reset
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ── Per-job service cost detail tooltip ──────────────────────────────
+// For service (T&M) jobs: show the total direct cost buckets + the top
+// 10 line items (work orders) that make up that cost on hover.
+function ServiceCostCell({ job, workOrders }) {
+  const [open, setOpen] = useState(false)
+
+  // Top-10 work orders by billed amount
+  const top10 = useMemo(() => {
+    const wos = (workOrders || [])
+      .filter((w) => w.jobNum === job.num)
+      .sort((a, b) => b.billed - a.billed)
+      .slice(0, 10)
+    return wos
+  }, [workOrders, job.num])
+
+  const totalBilled = top10.reduce((s, w) => s + w.billed, 0)
+
+  return (
+    <td
+      className="right"
+      style={{
+        position: 'relative',
+        cursor: top10.length > 0 ? 'help' : 'default',
+        fontWeight: 600,
+      }}
+      onMouseEnter={() => top10.length > 0 && setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      {fmt(job.directCost)}
+      {open && top10.length > 0 && (
+        <div
+          role="tooltip"
+          style={{
+            position: 'absolute',
+            zIndex: 60,
+            right: 0,
+            top: 'calc(100% + 4px)',
+            minWidth: 320,
+            maxWidth: 420,
+            background: 'var(--panel-dark, #1b1f25)',
+            border: '1px solid var(--border-bright, #3a4049)',
+            borderRadius: 8,
+            padding: '10px 12px',
+            boxShadow: '0 8px 28px rgba(0,0,0,0.45)',
+            textAlign: 'left',
+            fontWeight: 400,
+            fontSize: '0.78rem',
+            color: 'var(--white)',
+          }}
+        >
+          {/* Cost bucket summary */}
+          <div style={{ color: 'var(--gold)', fontWeight: 700, marginBottom: 6, letterSpacing: '0.04em', fontSize: '0.75rem' }}>
+            DIRECT COST BREAKDOWN
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 10 }}>
+            <tbody>
+              {COST_BUCKETS.filter((b) => (job[b.key] || 0) > 0).map((b) => (
+                <tr key={b.key}>
+                  <td style={{ padding: '1px 4px' }}>
+                    <span style={{ display: 'inline-block', width: 8, height: 8, background: b.color, borderRadius: 2, marginRight: 5 }} />
+                    {b.label}
+                  </td>
+                  <td style={{ textAlign: 'right', padding: '1px 4px', fontWeight: 600 }}>{fmt(job[b.key] || 0)}</td>
+                  <td style={{ textAlign: 'right', padding: '1px 4px', color: 'var(--text-dim)' }}>
+                    {job.directCost ? pct(((job[b.key] || 0) / job.directCost) * 100, 0) : '—'}
+                  </td>
+                </tr>
+              ))}
+              <tr style={{ borderTop: '1px solid rgba(255,255,255,0.15)', fontWeight: 700 }}>
+                <td style={{ padding: '3px 4px' }}>Total</td>
+                <td style={{ textAlign: 'right', padding: '3px 4px' }}>{fmt(job.directCost)}</td>
+                <td style={{ textAlign: 'right', padding: '3px 4px', color: 'var(--text-dim)' }}>100%</td>
+              </tr>
+            </tbody>
+          </table>
+
+          {/* Top-10 work orders */}
+          <div style={{ color: 'var(--gold)', fontWeight: 700, marginBottom: 6, letterSpacing: '0.04em', fontSize: '0.75rem' }}>
+            TOP {top10.length} WORK ORDERS BY BILLED
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left', padding: '2px 4px', color: 'rgba(255,255,255,0.5)', fontWeight: 600, fontSize: '0.72rem' }}>WO #</th>
+                <th style={{ textAlign: 'left', padding: '2px 4px', color: 'rgba(255,255,255,0.5)', fontWeight: 600, fontSize: '0.72rem' }}>Description</th>
+                <th style={{ textAlign: 'right', padding: '2px 4px', color: 'rgba(255,255,255,0.5)', fontWeight: 600, fontSize: '0.72rem' }}>Billed</th>
+                <th style={{ textAlign: 'right', padding: '2px 4px', color: 'rgba(255,255,255,0.5)', fontWeight: 600, fontSize: '0.72rem' }}>Hrs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {top10.map((w, i) => (
+                <tr key={w.wo} style={{ background: i % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'transparent' }}>
+                  <td style={{ padding: '2px 4px', color: 'var(--text-dim)' }}>{w.wo}</td>
+                  <td style={{ padding: '2px 4px', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {w.description || '—'}
+                  </td>
+                  <td style={{ textAlign: 'right', padding: '2px 4px', fontWeight: 600 }}>{fmt(w.billed)}</td>
+                  <td style={{ textAlign: 'right', padding: '2px 4px', color: 'var(--text-dim)' }}>{w.hours}</td>
+                </tr>
+              ))}
+              {top10.length < (workOrders || []).filter((w) => w.jobNum === job.num).length && (
+                <tr>
+                  <td colSpan={4} style={{ padding: '3px 4px', color: 'var(--text-dim)', fontStyle: 'italic', fontSize: '0.72rem' }}>
+                    + {(workOrders || []).filter((w) => w.jobNum === job.num).length - top10.length} more WOs — expand row for full list
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ color: 'var(--text-dim)' }}>Top 10 total</span>
+            <span style={{ fontWeight: 700 }}>{fmt(totalBilled)}</span>
+          </div>
+        </div>
+      )}
+    </td>
+  )
+}
+
+// ── Productivity helper for service jobs ──────────────────────────────
+function serviceProductivity(serviceJobs, workOrders) {
+  const rev = serviceJobs.reduce((s, j) => s + j.revenue, 0)
+  const hrs = workOrders
+    .filter((w) => serviceJobs.some((j) => j.num === w.jobNum))
+    .reduce((s, w) => s + w.hours, 0)
+  return {
+    revenue: rev,
+    hours: hrs,
+    revenuePerHour: hrs ? +(rev / hrs).toFixed(2) : null,
+    jobCount: serviceJobs.length,
+  }
+}
+
 export default function OpsJobsPage() {
   const { jobs, purchaseOrders, workOrders } = useOpsData()
+  const { setJobTypeOverride, applyJobTypeOverrides } = useOpsViewState()
+
   const [view, setView]       = useState('contract')
   const [q, setQ]             = useState('')
   const [status, setStatus]   = useState('all')
@@ -122,8 +307,12 @@ export default function OpsJobsPage() {
   const [expanded, setExpanded] = useState(null)
   const [mode, setMode]       = useState('actual')
 
-  const contractJobs = useMemo(() => jobs.filter((j) => j.type === 'contract'), [jobs])
-  const serviceJobs  = useMemo(() => jobs.filter((j) => j.type === 'service'),  [jobs])
+  // Apply user overrides to all jobs so downstream filters see the
+  // corrected types throughout this component.
+  const effectiveJobs = useMemo(() => applyJobTypeOverrides(jobs), [jobs, applyJobTypeOverrides])
+
+  const contractJobs = useMemo(() => effectiveJobs.filter((j) => j.type === 'contract'), [effectiveJobs])
+  const serviceJobs  = useMemo(() => effectiveJobs.filter((j) => j.type === 'service'),  [effectiveJobs])
 
   const tmRollup = useMemo(() => {
     if (!serviceJobs.length) return null
@@ -164,7 +353,9 @@ export default function OpsJobsPage() {
     })
   }, [serviceJobs, workOrders])
 
-  const prodSummary = useMemo(() => companyProductivity(jobs), [jobs])
+  // ── Split productivity summaries ─────────────────────────────────
+  const contractProd = useMemo(() => companyProductivity(contractJobs), [contractJobs])
+  const svcProd      = useMemo(() => serviceProductivity(serviceJobs, workOrders), [serviceJobs, workOrders])
 
   const rows = useMemo(() => {
     const source = view === 'contract'
@@ -211,32 +402,55 @@ export default function OpsJobsPage() {
     return String(v ?? '—')
   }
 
+  // Productivity colour helper
+  const prodColor = (p) =>
+    p == null ? 'var(--white)'
+    : p >= 1.0 ? 'var(--pos)'
+    : p >= 0.9 ? 'var(--gold)'
+    : 'var(--neg)'
+
   return (
     <div>
-      {/* ── Productivity summary cards ───────────────────────────── */}
-      <div className="ops-grid-4">
+      {/* ── Productivity summary cards — split Contract / Service ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16, marginBottom: 20 }}>
+
+        {/* Contract productivity */}
         <OpsSectionCard
-          title="Company productivity"
-          subtitle="Earned-value across all contract jobs"
+          title="Contract productivity"
+          subtitle="Earned-value across contract jobs only"
         >
-          <div className="ops-kpi-value">
-            {prodSummary.productivity == null ? '—' : prodSummary.productivity.toFixed(2)}
+          <div className="ops-kpi-value" style={{ color: prodColor(contractProd.productivity) }}>
+            {contractProd.productivity == null ? '—' : contractProd.productivity.toFixed(2)}
           </div>
           <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
-            {prodSummary.earnedHrs.toLocaleString()} earned hrs ÷ {prodSummary.actualHrs.toLocaleString()} actual hrs
+            {contractProd.earnedHrs.toLocaleString()} earned hrs ÷ {contractProd.actualHrs.toLocaleString()} actual hrs
           </div>
           <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>
-            1.00 = on plan · {prodSummary.jobCount} contract jobs
+            1.00 = on plan · {contractProd.jobCount} contract jobs
           </div>
         </OpsSectionCard>
-        <OpsSectionCard title="Revenue per field hour" subtitle="Contract jobs only">
+
+        {/* Contract revenue per field hour */}
+        <OpsSectionCard title="Contract rev / field hour" subtitle="Contract revenue ÷ actual labor hrs">
           <div className="ops-kpi-value">
-            {prodSummary.revenuePerHour == null ? '—' : `$${prodSummary.revenuePerHour.toFixed(0)}`}
+            {contractProd.revenuePerHour == null ? '—' : `$${contractProd.revenuePerHour.toFixed(0)}`}
           </div>
           <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
             Revenue booked ÷ actual hours worked
           </div>
         </OpsSectionCard>
+
+        {/* Service revenue per field hour */}
+        <OpsSectionCard title="Service rev / field hour" subtitle="T&M revenue ÷ work-order hours">
+          <div className="ops-kpi-value">
+            {svcProd.revenuePerHour == null ? '—' : `$${svcProd.revenuePerHour.toFixed(0)}`}
+          </div>
+          <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
+            {fmtK(svcProd.revenue)} billed ÷ {svcProd.hours.toLocaleString()} hrs · {svcProd.jobCount} service jobs
+          </div>
+        </OpsSectionCard>
+
+        {/* How we measure */}
         <OpsSectionCard
           title="How we measure productivity"
           subtitle="Earned value, shown on every row"
@@ -249,11 +463,13 @@ export default function OpsJobsPage() {
               1.00 = on plan · {'>'}1.00 ahead · {'<'}1.00 behind
             </div>
             <div style={{ marginTop: 4 }}>
-              Service (T&amp;M) jobs are excluded — no %&nbsp;complete.
+              Service (T&amp;M) shows rev/hr instead — no %&nbsp;complete.
             </div>
           </div>
         </OpsSectionCard>
-        <OpsSectionCard title="Retainage held (all contract jobs)" subtitle="Per-job detail in expanded row">
+
+        {/* Retainage */}
+        <OpsSectionCard title="Retainage held (contract jobs)" subtitle="Per-job detail in expanded row">
           <div className="ops-kpi-value">
             {fmtK(contractJobs.reduce((s, j) => s + (j.retainageHeld || 0), 0))}
           </div>
@@ -270,8 +486,8 @@ export default function OpsJobsPage() {
         title={view === 'contract' ? 'Jobs P&L — Contract' : 'Jobs P&L — Service (T&M)'}
         subtitle={
           view === 'contract'
-            ? 'Click any column header to sort. Click a row to expand cost buckets, POs, weekly curve, and retainage. Hover the ⓘ next to any column header to see how the value is calculated.'
-            : 'Click a row to expand the work-order list for that service job. Hover the ⓘ next to any column header to see the data source.'
+            ? 'Click any column header to sort. Click a row to expand cost buckets, POs, weekly curve, retainage, and job-type reclassification. Hover ⓘ to see how values are calculated.'
+            : 'Click a row to expand the work-order list. Hover the Direct Cost cell to see the cost breakdown + top 10 work orders. Expand to reclassify a job.'
         }
         right={
           <div className="ops-toolbar">
@@ -324,19 +540,23 @@ export default function OpsJobsPage() {
                       key={j.num}
                       job={j}
                       purchaseOrders={purchaseOrders}
+                      workOrders={workOrders}
                       expanded={expanded === j.num}
                       onToggle={() => setExpanded(expanded === j.num ? null : j.num)}
                       fmtCell={fmtCell}
                       columns={columns}
                       mode={mode}
+                      onReclassify={setJobTypeOverride}
                     />
                   : <ServiceJobRow
                       key={j.num}
                       job={j}
+                      workOrders={workOrders}
                       expanded={expanded === j.num}
                       onToggle={() => setExpanded(expanded === j.num ? null : j.num)}
                       fmtCell={fmtCell}
                       columns={columns}
+                      onReclassify={setJobTypeOverride}
                     />
               ))}
               {!rows.length && (
@@ -359,8 +579,8 @@ function runSum(arr) {
   return arr.map((v) => (s += v))
 }
 
-// ── Contract-job row ──────────────────────────────────────────────
-function ContractJobRow({ job, purchaseOrders, expanded, onToggle, fmtCell, columns, mode }) {
+// ── Contract-job row ──────────────────────────────────────────────────
+function ContractJobRow({ job, purchaseOrders, workOrders, expanded, onToggle, fmtCell, columns, mode, onReclassify }) {
   if (job.isRollup) {
     return (
       <tr style={{ fontStyle: 'italic', borderTop: '1px dashed var(--border-bright)' }}>
@@ -430,7 +650,6 @@ function ContractJobRow({ job, purchaseOrders, expanded, onToggle, fmtCell, colu
   const poOutstandingTot = jobPOs.reduce((s, p) => s + (p.amount - p.billed), 0)
 
   const { productivity, earnedHrs } = jobProductivity(job)
-
   const chipCls = job.status === 'Closed' ? 'closed' : job.status === 'Hold' ? 'hold' : 'active'
 
   return (
@@ -454,6 +673,12 @@ function ContractJobRow({ job, purchaseOrders, expanded, onToggle, fmtCell, colu
                 <div className="ops-small ops-text-dim">
                   Rev {fmtK(job.revenue)} · Direct Cost {fmtK(costTot)} · GP {fmtK(job.revenue - costTot)} ({pct(job.gpPct, 1)})
                 </div>
+                {/* ── Reclassification control ── */}
+                <JobTypeToggle
+                  job={job}
+                  currentType={job.type}
+                  onToggle={onReclassify}
+                />
               </div>
               <div className="ops-small ops-text-dim" style={{ textAlign: 'right', maxWidth: 320 }}>
                 <div>Budget: {job.budgetLaborHrs?.toLocaleString()} hrs · Actual: {job.actualLaborHrs?.toLocaleString()} hrs</div>
@@ -600,27 +825,46 @@ function ContractJobRow({ job, purchaseOrders, expanded, onToggle, fmtCell, colu
   )
 }
 
-// ── Service-job row ──────────────────────────────────────────────
-function ServiceJobRow({ job, expanded, onToggle, fmtCell, columns }) {
+// ── Service-job row ───────────────────────────────────────────────────
+function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, onReclassify }) {
   const chipCls = job.status === 'Closed' ? 'closed' : job.status === 'Hold' ? 'hold' : 'active'
   return (
     <>
       <tr className="clickable" onClick={onToggle}>
         <td className="ops-text-dim ops-small" style={{ width: 24 }}>{expanded ? '▾' : '▸'}</td>
-        {columns.map((c) => (
-          <td key={c.key} className={c.align === 'right' ? 'right' : ''}>
-            {c.key === 'status'
-              ? <span className={`chip ${chipCls}`}>{job.status}</span>
-              : fmtCell(job, c)}
-          </td>
-        ))}
+        {columns.map((c) => {
+          // Replace the directCost cell with the enriched hover tooltip version
+          if (c.key === 'revenue') {
+            return (
+              <ServiceCostCell key="svcCost" job={job} workOrders={workOrders} />
+            )
+          }
+          return (
+            <td key={c.key} className={c.align === 'right' ? 'right' : ''}>
+              {c.key === 'status'
+                ? <span className={`chip ${chipCls}`}>{job.status}</span>
+                : fmtCell(job, c)}
+            </td>
+          )
+        })}
       </tr>
       {expanded && (
         <tr>
           <td colSpan={columns.length + 1} className="ops-row-expand">
-            <div style={{ fontWeight: 700, color: 'var(--white)', marginBottom: 6 }}>
-              {job.name} · work orders
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8, flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <div style={{ fontWeight: 700, color: 'var(--white)', marginBottom: 4 }}>
+                  {job.name} · work orders
+                </div>
+                {/* ── Reclassification control ── */}
+                <JobTypeToggle
+                  job={job}
+                  currentType={job.type}
+                  onToggle={onReclassify}
+                />
+              </div>
             </div>
+
             {job.workOrders.length === 0 ? (
               <div className="ops-small ops-text-dim">No work orders on file.</div>
             ) : (
