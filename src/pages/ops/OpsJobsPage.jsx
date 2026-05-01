@@ -13,10 +13,13 @@ import { fmt, fmtK, pct } from '../../lib/opsFormat'
 import { moneyLineOpts, PALETTE } from '../../lib/opsChartOpts'
 
 // ─────────────────────────────────────────────────────────────────────
-// Synthetic start/end dates keyed by job number.
-// In production these come from sage.jobs.start_date / projected_end.
+// UAT / mock fallback dates keyed by job number.
+// Live data: ops.jobs view now exposes startDate and completeDate
+// (sourced from sage.jobs.start_date / actual_start_date /
+//  complete_date / actual_complete_date).  These mock dates are only
+// used when a job has no date fields — i.e. on UAT with fixture data.
 // ─────────────────────────────────────────────────────────────────────
-const JOB_DATES = {
+const JOB_DATES_FALLBACK = {
   '2430':      { start: '2024-03-01', end: '2026-09-30' },
   '2512':      { start: '2024-07-15', end: '2026-12-31' },
   '2544':      { start: '2024-09-01', end: '2027-06-30' },
@@ -414,7 +417,9 @@ function ContractJobRow({ job, purchaseOrders, workOrders, expanded, onToggle, f
   }
 
   const chipCls = job.status === 'Closed' ? 'closed' : job.status === 'Hold' ? 'hold' : 'active'
-  const dates   = JOB_DATES[job.num]
+  const dates   = job.startDate || job.completeDate
+    ? { start: job.startDate, end: job.completeDate }
+    : JOB_DATES_FALLBACK[job.num] || null
 
   return (
     <>
@@ -578,7 +583,9 @@ function ContractJobRow({ job, purchaseOrders, workOrders, expanded, onToggle, f
 // ─────────────────────────────────────────────────────────────────────
 function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, onReclassify }) {
   const chipCls = job.status === 'Closed' ? 'closed' : job.status === 'Hold' ? 'hold' : 'active'
-  const dates   = JOB_DATES[job.num]
+  const dates   = job.startDate || job.completeDate
+    ? { start: job.startDate, end: job.completeDate }
+    : JOB_DATES_FALLBACK[job.num] || null
   return (
     <>
       <tr className="clickable" onClick={onToggle}>
@@ -715,12 +722,14 @@ export default function OpsJobsPage() {
     if (dateFilterOn) {
       filtered = filtered.filter((j) => {
         if (j.isRollup) return true
-        const d = JOB_DATES[j.num]
-        if (!d) return true  // no date data → always show
-        const jobStart = d.start
-        const jobEnd   = d.end || '9999-12-31'
+        // Prefer live Sage dates (startDate/completeDate on the job object),
+        // fall back to UAT mock dates map, then show the job if no data.
+        const jobStart = j.startDate || JOB_DATES_FALLBACK[j.num]?.start || null
+        const jobEnd   = j.completeDate || JOB_DATES_FALLBACK[j.num]?.end || null
+        if (!jobStart) return true  // no date data → always show
+        const endStr = jobEnd || '9999-12-31'
         // Show job if its date range overlaps the filter window
-        return jobEnd >= dateFrom && jobStart <= dateTo
+        return endStr >= dateFrom && jobStart <= dateTo
       })
     }
 

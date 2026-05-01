@@ -129,7 +129,14 @@ SELECT
         ELSE (j.retainage * 100)::numeric
     END                                                  AS "retainagePct",
     COALESCE(ar.retainage_held, 0)                       AS "retainageHeld",
-    COALESCE(NULLIF(j.contact, ''), j.job_name)          AS customer
+    COALESCE(NULLIF(j.contact, ''), j.job_name)          AS customer,
+    -- Date fields from Sage — used by the Jobs P&L date-range filter.
+    -- start_date/complete_date = scheduled dates (sttdte/cmpdte in Sage v27)
+    -- actual_start_date/actual_complete_date = real work dates (strdte/dtecmp)
+    j.start_date                                         AS "startDate",
+    j.complete_date                                      AS "completeDate",
+    j.actual_start_date                                  AS "actualStartDate",
+    j.actual_complete_date                               AS "actualCompleteDate"
 FROM sage.jobs j
 LEFT JOIN cost_roll   c  ON (c.source_company, c.job_recnum)  = (j.source_company, j.recnum)
 LEFT JOIN budget_roll b  ON (b.source_company, b.job_recnum)  = (j.source_company, j.recnum)

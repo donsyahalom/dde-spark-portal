@@ -94,10 +94,14 @@ function enrichJob(j) {
     revenue,
     contract,
     retainagePct,
-    retainageHeld:  num(j.retainageHeld),
-    pctCmp:         num(j.pctCmp),
-    budgetLaborHrs: num(j.budgetLaborHrs),
-    actualLaborHrs: num(j.actualLaborHrs),
+    retainageHeld:      num(j.retainageHeld),
+    pctCmp:             num(j.pctCmp),
+    budgetLaborHrs:     num(j.budgetLaborHrs),
+    actualLaborHrs:     num(j.actualLaborHrs),
+    // Date fields from ops.jobs view (sage.jobs columns passed through).
+    // Prefer actual dates when available, fall back to scheduled.
+    startDate:          j.actualStartDate || j.startDate || null,
+    completeDate:       j.actualCompleteDate || j.completeDate || null,
   }
 }
 
