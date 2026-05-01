@@ -96,11 +96,12 @@ function safePct(v) {
 function runSum(arr) { let s = 0; return arr.map((v) => (s += v)) }
 
 // Job date range for filter purposes.
-// Priority: use Sage's actual/scheduled dates when available.
-// Falls back to contractDate (always populated when a contract is awarded).
-// Falls back to UAT fixture dates for mock data.
+// On live data: startDate = COALESCE(firstInvoiceDate, sagStartDate, contractDate)
+//               completeDate = COALESCE(lastInvoiceDate, sagCompleteDate)
+// Both are computed in the ops.jobs view from actual billing activity.
+// Falls back to UAT fixture dates for mock data only.
 function jobDates(job) {
-  const start = job.startDate || job.contractDate || null
+  const start = job.startDate || null
   const end   = job.completeDate || null
   if (start) return { start, end }
   return JOB_DATES_FALLBACK[job._primaryNum || job.num] || null
@@ -494,7 +495,10 @@ function ContractJobRow({ job, purchaseOrders, workOrders, expanded, onToggle,
                 <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--white)' }}>{job.name}</div>
                 <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>
                   Rev {fmtK(job.revenue)} · Cost {fmtK(costTot)} · GP {fmtK(job.revenue - costTot)} ({safePct(job.gpPct)})
-                  {dates && <> · {dates.start} → {dates.end || 'ongoing'}</>}
+                  {job.firstInvDate && (
+                    <> · Invoiced {job.firstInvDate} → {job.lastInvDate || 'ongoing'}</>
+                  )}
+                  {!job.firstInvDate && dates && <> · {dates.start} → {dates.end || 'ongoing'}</>}
                 </div>
                 {job._allNums?.length > 1 && (
                   <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>Job numbers: {job._allNums.join(', ')}</div>
@@ -834,6 +838,9 @@ export default function OpsJobsPage() {
       border: '1px solid rgba(240,192,64,0.18)', borderRadius: 8, marginBottom: 16 }}>
       <span className="ops-small" style={{ color: 'var(--gold)', fontWeight: 700, whiteSpace: 'nowrap' }}>
         Date Range Filter
+      </span>
+      <span className="ops-small ops-text-dim" style={{ whiteSpace: 'nowrap' }}>
+        based on invoice dates
       </span>
       <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', color: 'var(--white)', cursor: 'pointer' }}>
         <input type="checkbox" checked={dateFilterOn} onChange={(e) => setDateFilterOn(e.target.checked)} style={{ accentColor: 'var(--gold)' }} />
