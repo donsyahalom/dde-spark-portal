@@ -91,9 +91,17 @@ function fmtCell(val, unit) {
 
 export default function OpsPayrollPage() {
   const { payrollLines, jobs } = useOpsData()
-  const [mode, setMode]     = useState('employee') // 'employee' | 'job'
-  const [q, setQ]           = useState('')
-  const [weekFilter, setWf] = useState('all')
+  const [mode, setMode] = useState('employee') // 'employee' | 'job'
+  const [q, setQ]       = useState('')
+
+  // Date range — defaults to YTD (Jan 1 current year → today)
+  const today    = new Date()
+  const thisYear = today.getFullYear()
+  const ytdFrom  = `${thisYear}-01-01`
+  const ytdTo    = today.toISOString().slice(0, 10)
+  const [dateFrom, setDateFrom] = useState(ytdFrom)
+  const [dateTo,   setDateTo]   = useState(ytdTo)
+  const isYtd = dateFrom === ytdFrom && dateTo === ytdTo
   // Time-series viz — which contract job to slice by ("all" aggregates
   // across every contract job in view).
   const [tsJob, setTsJob]   = useState('all')
@@ -124,6 +132,7 @@ export default function OpsPayrollPage() {
     const byWeek = new Map() // week → {ot, sick, vac, hol}
     for (const raw of payrollLines) {
       if (!contractJobNums.has(raw.job)) continue
+      if (raw.week < dateFrom || raw.week > dateTo) continue
       if (tsJob !== 'all' && raw.job !== tsJob) continue
       const p = computePayroll(raw)
       if (!byWeek.has(p.week)) byWeek.set(p.week, { ot: 0, sick: 0, vac: 0, hol: 0 })
@@ -151,31 +160,27 @@ export default function OpsPayrollPage() {
           fill: false, tension: 0.3, borderWidth: 2 },
       ],
     }
-  }, [payrollLines, contractJobNums, tsJob])
+  }, [payrollLines, contractJobNums, tsJob, dateFrom, dateTo])
 
   const tsOpts = useMemo(() => moneyLineOpts(), [])
-
-  const weeks = useMemo(
-    () => Array.from(new Set(payrollLines.map((l) => l.week))).sort(),
-    [payrollLines],
-  )
 
   // Filter raw lines first — search is against employee name / trade
   // when in employee mode, or job # / job name when in job mode, so the
   // visible rows match the user's intent.
   const visibleLines = useMemo(() => {
     let rows = payrollLines
-    if (weekFilter !== 'all') rows = rows.filter((l) => l.week === weekFilter)
+    // Date filter: include weeks whose week-ending date falls within the range
+    rows = rows.filter((l) => l.week >= dateFrom && l.week <= dateTo)
     if (q.trim()) {
       const needle = q.toLowerCase()
       rows = rows.filter((l) => (
         mode === 'employee'
-          ? (l.emp.toLowerCase().includes(needle) || l.trade.toLowerCase().includes(needle))
-          : (l.job.toLowerCase().includes(needle) || l.jobName.toLowerCase().includes(needle))
+          ? ((l.emp || '').toLowerCase().includes(needle) || (l.trade || '').toLowerCase().includes(needle))
+          : ((l.job || '').toLowerCase().includes(needle) || (l.jobName || '').toLowerCase().includes(needle))
       ))
     }
     return rows
-  }, [payrollLines, weekFilter, q, mode])
+  }, [payrollLines, dateFrom, dateTo, q, mode])
 
   const groups = useMemo(() => {
     return mode === 'employee'
@@ -195,6 +200,27 @@ export default function OpsPayrollPage() {
 
   return (
     <div>
+      {/* Date range filter bar */}
+      <div className="ops-filter-bar" style={{ marginBottom: 16 }}>
+        <span className="ops-small" style={{ color: 'var(--gold)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+          {isYtd ? 'YTD Filter' : 'Date Range Filter'}
+        </span>
+        <span className="ops-small ops-text-dim">based on week-ending date</span>
+        <input type="date" className="ops-input" value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+          style={{ width: 148 }} />
+        <span className="ops-small ops-text-dim">→</span>
+        <input type="date" className="ops-input" value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+          style={{ width: 148 }} />
+        <button className="ops-btn ghost" style={{ fontSize: '0.78rem', padding: '3px 10px' }}
+          onClick={() => { setDateFrom(ytdFrom); setDateTo(ytdTo) }}
+          title="Reset to Year-to-Date">↺ YTD</button>
+        <span className="ops-small ops-text-dim">
+          {visibleLines.length} rows in range
+        </span>
+      </div>
+
       {/* Summary cards — quick read on total field cost + burden share. */}
       <div className="ops-grid-3">
         <OpsSectionCard title="Gross wages">
@@ -255,16 +281,12 @@ export default function OpsPayrollPage() {
               <button onClick={() => setMode('employee')} className={mode === 'employee' ? 'active' : ''}>By employee</button>
               <button onClick={() => setMode('job')}      className={mode === 'job'      ? 'active' : ''}>By job</button>
             </div>
-            <select className="ops-select" value={weekFilter} onChange={(e) => setWf(e.target.value)}>
-              <option value="all">All weeks</option>
-              {weeks.map((w) => <option key={w} value={w}>Wk ending {w}</option>)}
-            </select>
             <input
               className="ops-input"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder={mode === 'employee' ? 'Search name or trade' : 'Search job # or name'}
-              style={{ width: 220 }}
+              style={{ width: 200 }}
             />
           </div>
         }
