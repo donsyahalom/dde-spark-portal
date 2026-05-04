@@ -330,7 +330,7 @@ export default function OpsArPage() {
       {/* ── Sage-style aging reports — AR and SR ──────────────────── */}
       <OpsSectionCard
         title="A/R aging — Sage style"
-        subtitle="Contract (AR) and Service (SR) reports rolled up by customer. Hover any cell to see the invoices behind it."
+        subtitle={`Contract (AR) and Service (SR) aging by customer — ${arInv.length} contract, ${srInv.length} service open invoices. Hover any cell for detail.`}
         right={
           <div className="ops-toolbar">
             <div className="ops-toggle" role="group" aria-label="Aging bucket mode">
@@ -550,7 +550,9 @@ export default function OpsArPage() {
       )}
 
       {/* ── Legacy full A/R list (kept for reference) ───────────── */}
-      <OpsSectionCard title="Open A/R — all invoices">
+      <OpsSectionCard
+        title="All open invoices — contract + service combined"
+        subtitle="Every open AR and SR invoice in one list. The aging report above groups these by customer; the sorted list above orders them by days late.">
         <div style={{ overflowX: 'auto' }}>
           <table className="ops-table">
             <thead>
