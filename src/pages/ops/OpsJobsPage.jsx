@@ -111,7 +111,10 @@ function jobDates(job) {
 function serviceProductivity(serviceJobs, workOrders) {
   const svcNums = new Set(serviceJobs.map((j) => j._primaryNum || j.num))
   const rev = serviceJobs.reduce((s, j) => s + (j.revenue || 0), 0)
-  const hrs = workOrders.filter((w) => svcNums.has(w.jobNum)).reduce((s, w) => s + w.hours, 0)
+  // Prefer live serviceHours from the view; fall back to mock WO hours
+  const liveHrs = serviceJobs.reduce((s, j) => s + (j.serviceHours || 0), 0)
+  const woHrs   = workOrders.filter((w) => svcNums.has(w.jobNum)).reduce((s, w) => s + w.hours, 0)
+  const hrs = liveHrs > 0 ? liveHrs : woHrs
   return {
     revenue: rev,
     hours: hrs,
@@ -994,9 +997,18 @@ export default function OpsJobsPage() {
   const serviceRows = useMemo(() =>
     serviceJobs.map((j) => {
       const wos  = workOrders.filter((w) => w.jobNum === j.num)
-      const hrs  = wos.reduce((s, w) => s + w.hours, 0)
+      const woHrs  = wos.reduce((s, w) => s + w.hours, 0)
       const bill = wos.reduce((s, w) => s + w.billed, 0)
-      return { ...j, hours: hrs, avgRate: hrs ? +(bill / hrs).toFixed(0) : 0, openWos: wos.filter((w) => w.status === 'open').length, workOrders: wos }
+      // Prefer serviceHours from the view (actual_hours on srvinv) over mock WO data
+      const hrs = j.serviceHours > 0 ? j.serviceHours : woHrs
+      const rev = j.revenue || 0
+      return {
+        ...j,
+        hours:   hrs,
+        avgRate: hrs ? +(rev / hrs).toFixed(0) : 0,
+        openWos: wos.filter((w) => w.status === 'open').length,
+        workOrders: wos,
+      }
     }),
     [serviceJobs, workOrders],
   )
