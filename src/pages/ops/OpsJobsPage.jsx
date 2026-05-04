@@ -916,56 +916,6 @@ function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, 
 
 
 
-// ─────────────────────────────────────────────────────────────────────
-// usePeriodProductivity
-// Calls ops.get_period_productivity(from_date, to_date) via a single
-// Supabase RPC — all computation is done server-side in Postgres.
-// Returns null while loading or when the live path is not active.
-// To roll back: set  const activeProd = contractProd  (one line).
-// ─────────────────────────────────────────────────────────────────────
-const _IS_LIVE = String(import.meta.env.VITE_USE_LIVE_DATA || '').toLowerCase() === 'true'
-
-function usePeriodProductivity(from, to, enabled) {
-  const [data,    setData]    = useState(null)
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    if (!enabled || !from || !to || !_IS_LIVE) {
-      setData(null)
-      return
-    }
-    let cancelled = false
-    setLoading(true)
-    ;(async () => {
-      try {
-        const { supabase } = await import('../../lib/supabase')
-        const { data: rows, error } = await supabase
-          .schema('ops')
-          .rpc('get_period_productivity', { from_date: from, to_date: to })
-        if (cancelled) return
-        if (error) throw error
-        const row = Array.isArray(rows) ? rows[0] : rows
-        setData(row && row.actual_hrs > 0 ? {
-          earnedHrs:      Number(row.earned_hrs      || 0),
-          actualHrs:      Number(row.actual_hrs      || 0),
-          productivity:   row.productivity   != null ? Number(row.productivity)   : null,
-          revenuePerHour: row.revenue_per_hr != null ? Number(row.revenue_per_hr) : null,
-          jobCount:       Number(row.job_count || 0),
-          isPeriod: true,
-        } : null)
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn('[usePeriodProductivity] RPC failed — using weighted lifetime:', e)
-        setData(null)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [enabled, from, to])
-
-  return { periodProd: data, loading }
-}
 
 export default function OpsJobsPage() {
   const { jobs, purchaseOrders, workOrders } = useOpsData()
@@ -1017,11 +967,6 @@ export default function OpsJobsPage() {
   // isAdmin — stub: replace with useAuth check when wired
   const isAdmin = true
 
-  // Period productivity via server-side RPC — only runs on live path
-  const { periodProd, loading: prodLoading } = usePeriodProductivity(
-    dateFrom, dateTo, dateFilterOn,
-  )
-
   // ── Data pipeline ────────────────────────────────────────────────────
   // 1. Apply type overrides
   const effectiveJobs = useMemo(() =>
@@ -1067,8 +1012,6 @@ export default function OpsJobsPage() {
     () => companyProductivity(allContractJobs, prodFilterFrom, prodFilterTo),
     [allContractJobs, prodFilterFrom, prodFilterTo],
   )
-  // Use period RPC result when available, fall back to day-weighted lifetime
-  const activeProd   = periodProd ?? contractProd
   const svcProd      = useMemo(() => serviceProductivity(allServiceJobs, workOrders), [allServiceJobs, workOrders])
 
   // 5. Enrich service rows with WO stats
@@ -1217,19 +1160,17 @@ export default function OpsJobsPage() {
       <div className="ops-grid-3" style={{ marginBottom: 12 }}>
         <OpsSectionCard title="Contract productivity"
           subtitle={dateFilterOn
-            ? (prodLoading ? 'Loading…'
-              : periodProd ? `Period estimate · ${dateFrom} → ${dateTo}`
-              : `Day-weighted · ${dateFrom} → ${dateTo}`)
+            ? `Day-weighted · ${dateFrom} → ${dateTo}`
             : "Lifetime earned-value — all contract jobs"}>
-          <div className="ops-kpi-value" style={{ color: prodColor(activeProd.productivity) }}>
-            {prodLoading ? '…' : activeProd.productivity == null ? '—' : activeProd.productivity.toFixed(2)}
+          <div className="ops-kpi-value" style={{ color: prodColor(contractProd.productivity) }}>
+            {contractProd.productivity == null ? '—' : contractProd.productivity.toFixed(2)}
           </div>
-          {activeProd.actualHrs > 0 ? (
+          {contractProd.actualHrs > 0 ? (
             <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
-              {(activeProd.earnedHrs || 0).toLocaleString()} earned ÷ {(activeProd.actualHrs || 0).toLocaleString()} actual hrs
+              {(contractProd.earnedHrs || 0).toLocaleString()} earned ÷ {(contractProd.actualHrs || 0).toLocaleString()} actual hrs
               <div style={{ marginTop: 2 }}>
-                1.00 = on plan · {activeProd.jobCount} job{activeProd.jobCount !== 1 ? 's' : ''}
-                {activeProd.isPeriod ? ' · cost-based period' : activeProd.isWeighted ? ' · day-weighted' : ' · all time'}
+                1.00 = on plan · {contractProd.jobCount} job{contractProd.jobCount !== 1 ? 's' : ''}
+                {false ? ' · cost-based period' : contractProd.isWeighted ? ' · day-weighted' : ' · all time'}
               </div>
             </div>
           ) : (
@@ -1242,7 +1183,7 @@ export default function OpsJobsPage() {
 
         <OpsSectionCard title="Contract rev / field hour" subtitle={contractProd.isWeighted ? `Day-weighted · ${dateFrom} → ${dateTo}` : "Lifetime metric — all contract jobs"}>
           <div className="ops-kpi-value">
-            {activeProd.revenuePerHour == null ? '—' : `$${activeProd.revenuePerHour.toFixed(0)}`}
+            {contractProd.revenuePerHour == null ? '—' : `$${contractProd.revenuePerHour.toFixed(0)}`}
           </div>
           <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
             {contractProd.revenuePerHour != null
