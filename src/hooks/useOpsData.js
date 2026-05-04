@@ -34,21 +34,16 @@ const USE_LIVE = String(import.meta.env.VITE_USE_LIVE_DATA || '').toLowerCase() 
 // fixtures so pages always render.
 export function useOpsData() {
   const { pc, basis } = useOpsViewState()
-
-  // Always call the live hook (hooks must be called unconditionally).
-  // It no-ops cheaply when the flag is off — the internal effect only
-  // fires once and the error state is the signal we use to fall back.
   const live = useOpsDataLive()
 
-  // While the live fetch is in flight, return null so pages can show
-  // a loading state instead of flashing mock data.
-  if (USE_LIVE && live.loading) return null
+  // Expose loading so pages can show a spinner without returning null
+  // (which would violate React hook rules if hooks follow the call site).
+  const loading = USE_LIVE && live.loading
 
   return useMemo(() => {
     if (USE_LIVE && live.data) {
-      return live.data
+      return { ...live.data, loading: false }
     }
-    // Fixture path — unchanged behaviour.
     const pnl = PNL[pc]
     const adjust = basis === 'Cash' ? 0.94 : 1
     const pnlScaled = {
@@ -60,14 +55,12 @@ export function useOpsData() {
       overhead: pnl.overhead.map((v) => Math.round(v * adjust)),
       net:      pnl.net.map((v) => Math.round(v * adjust)),
     }
-
     const jobsForPc = JOBS[pc]
     const jobNums   = new Set(jobsForPc.map((j) => j.num))
-
     const purchaseOrders = PURCHASE_ORDERS.filter((p) => jobNums.has(p.jobNum))
     const workOrders     = WORK_ORDERS.filter((w) => jobNums.has(w.jobNum))
-
     return {
+      loading,
       kpis:            KPIS[pc],
       pnl:             pnlScaled,
       jobs:            jobsForPc,
@@ -82,7 +75,7 @@ export function useOpsData() {
       workOrders,
       arEmailDefaults: AR_EMAIL_DEFAULTS,
     }
-  }, [pc, basis, live.data])
+  }, [pc, basis, live.data, loading])
 }
 
 export { buildWeekly, companyProductivity, computePayroll, jobProductivity }
