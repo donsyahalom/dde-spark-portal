@@ -993,11 +993,22 @@ export default function OpsJobsPage() {
   const outOfRangeCount = contractOut + serviceOut
   const noDatesCount    = contractNoDates + serviceNoDates
 
-  // 4. Card metrics — use date-filtered lists so cards match the table.
-  //    Jobs with no date data pass through the filter so they still
-  //    contribute to productivity (can't prove they're outside the range).
-  const contractProd = useMemo(() => companyProductivity(contractJobs), [contractJobs])
-  const svcProd      = useMemo(() => serviceProductivity(serviceJobs, workOrders), [serviceJobs, workOrders])
+  // 4. Card metrics.
+  //    Productivity uses ALL contract jobs (lifetime metric) — budgetLaborHrs,
+  //    actualLaborHrs and pctCmp are Sage lifetime totals, not period-specific.
+  //    Filtering by date would mix period-scoped job lists with lifetime hour
+  //    totals, producing a meaningless ratio.
+  //    Revenue, retainage and service cards use the date-filtered lists so
+  //    those figures match the table.
+  // Pass filter dates so companyProductivity can weight each job's contribution
+  // by the fraction of its lifetime that falls within the selected window.
+  const prodFilterFrom = dateFilterOn ? dateFrom : null
+  const prodFilterTo   = dateFilterOn ? dateTo   : null
+  const contractProd = useMemo(
+    () => companyProductivity(allContractJobs, prodFilterFrom, prodFilterTo),
+    [allContractJobs, prodFilterFrom, prodFilterTo],
+  )
+  const svcProd      = useMemo(() => serviceProductivity(allServiceJobs, workOrders), [allServiceJobs, workOrders])
 
   // 5. Enrich service rows with WO stats
   const serviceRows = useMemo(() =>
@@ -1143,14 +1154,14 @@ export default function OpsJobsPage() {
 
       {/* Cards row 1 — Contract */}
       <div className="ops-grid-3" style={{ marginBottom: 12 }}>
-        <OpsSectionCard title="Contract productivity" subtitle="Earned-value across contract jobs">
+        <OpsSectionCard title="Contract productivity" subtitle={contractProd.isWeighted ? `Day-weighted earned-value · ${dateFrom} → ${dateTo}` : "Lifetime earned-value — all contract jobs"}>
           <div className="ops-kpi-value" style={{ color: prodColor(contractProd.productivity) }}>
             {contractProd.productivity == null ? '—' : contractProd.productivity.toFixed(2)}
           </div>
           {contractProd.actualHrs > 0 ? (
             <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
               {(contractProd.earnedHrs || 0).toLocaleString()} earned ÷ {(contractProd.actualHrs || 0).toLocaleString()} actual hrs
-              <div style={{ marginTop: 2 }}>1.00 = on plan · {contractProd.jobCount} job{contractProd.jobCount !== 1 ? 's' : ''}</div>
+              <div style={{ marginTop: 2 }}>1.00 = on plan · {contractProd.jobCount} job{contractProd.jobCount !== 1 ? 's' : ''}{contractProd.isWeighted ? ' · day-weighted' : ' · all time'}</div>
             </div>
           ) : (
             <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
@@ -1160,7 +1171,7 @@ export default function OpsJobsPage() {
           )}
         </OpsSectionCard>
 
-        <OpsSectionCard title="Contract rev / field hour" subtitle="Contract revenue ÷ actual labor hrs">
+        <OpsSectionCard title="Contract rev / field hour" subtitle={contractProd.isWeighted ? `Day-weighted · ${dateFrom} → ${dateTo}` : "Lifetime metric — all contract jobs"}>
           <div className="ops-kpi-value">
             {contractProd.revenuePerHour == null ? '—' : `$${contractProd.revenuePerHour.toFixed(0)}`}
           </div>
