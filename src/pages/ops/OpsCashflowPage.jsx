@@ -10,6 +10,8 @@ export default function OpsCashflowPage() {
   const { cashflow, loading: _opsLoading } = useOpsData()
   const { basis, setBasis, appliedSummary, fallbackAvg } = useOpsCashflowBasis()
 
+  if (_opsLoading) return <div style={{ padding: '40px 20px', color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem', textAlign: 'center' }}>Loading data…</div>
+
   const data = {
     labels: cashflow.weeks,
     datasets: [
@@ -136,8 +138,6 @@ function BasisBanner() {
       </span>
     )
   }
-
-  if (_opsLoading) return <div style={{ padding: '40px 20px', color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem', textAlign: 'center' }}>Loading data…</div>
 
   return (
     <div className={`ops-banner ${cls}`}>

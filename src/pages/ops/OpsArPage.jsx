@@ -334,6 +334,8 @@ export default function OpsArPage() {
     })
   }, [routedInvoices, effectiveJobs, settings.subject, settings.content, settings.deliveryMode])
 
+  if (_opsLoading) return <div style={{ padding: '40px 20px', color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem', textAlign: 'center' }}>Loading data…</div>
+
   return (
     <div>
       {/* ── Aging at-a-glance ─────────────────────────────────────── */}
@@ -697,8 +699,6 @@ export default function OpsArPage() {
 }
 
 function InvoiceList({ title, rows }) {
-
-  if (_opsLoading) return <div style={{ padding: '40px 20px', color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem', textAlign: 'center' }}>Loading data…</div>
 
   return (
     <div>
