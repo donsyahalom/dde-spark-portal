@@ -103,3 +103,63 @@ export function companyProductivity(jobs, filterFrom, filterTo) {
     isWeighted:     !!(filterFrom && filterTo),
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Period-specific productivity (option 2 — cost-based approximation).
+//
+// Uses actual timecard hours and cost transactions within the date
+// window to approximate earned value for the period:
+//
+//   period_earned_hrs ≈ (period_cost / total_budget_cost) × budgetLaborHrs
+//   period_productivity = period_earned_hrs / period_actual_hrs
+//
+// This is less precise than true earned-value (which needs pctCmp
+// snapshots at the start and end of the period) but is computable
+// from data already in Supabase with no schema changes.
+//
+// periodData: array of { job_recnum, period_actual_hrs, period_cost }
+//             queried from sage.timecard_lines + sage.job_cost_transactions
+//             for the selected date window.
+// jobs:       the full job list (for budgetLaborHrs + totalBudget lookup)
+// ─────────────────────────────────────────────────────────────────────
+export function companyProductivityPeriod(periodData, jobs) {
+  if (!periodData || !periodData.length) {
+    return { earnedHrs: 0, actualHrs: 0, productivity: null, revenuePerHour: null, jobCount: 0, isPeriod: true }
+  }
+
+  // Build a quick lookup: job_recnum → job record
+  const jobMap = {}
+  for (const j of (jobs || [])) {
+    jobMap[j.jobNum || j.recnum] = j
+  }
+
+  let earnedHrs = 0
+  let actualHrs = 0
+  let revenue   = 0
+  let jobCount  = 0
+
+  for (const row of periodData) {
+    const j = jobMap[row.job_recnum]
+    if (!j || j.type !== 'contract') continue
+    if (!j.budgetLaborHrs || !j.totalBudget) continue   // no budget = can't compute
+    if (row.period_actual_hrs < 1) continue              // ignore sub-1hr blips
+
+    // Implied % of budget consumed in the period
+    const periodFraction = Math.min(1, (row.period_cost || 0) / j.totalBudget)
+    const periodEarned   = j.budgetLaborHrs * periodFraction
+
+    earnedHrs += periodEarned
+    actualHrs += row.period_actual_hrs
+    revenue   += (j.revenue || 0) * periodFraction
+    jobCount++
+  }
+
+  return {
+    earnedHrs:      Math.round(earnedHrs),
+    actualHrs:      Math.round(actualHrs),
+    productivity:   actualHrs >= MIN_ACTUAL_HRS ? +(earnedHrs / actualHrs).toFixed(2) : null,
+    revenuePerHour: actualHrs ? +(revenue / actualHrs).toFixed(2) : null,
+    jobCount,
+    isPeriod: true,
+  }
+}
