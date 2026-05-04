@@ -927,10 +927,14 @@ export default function OpsJobsPage() {
   const [mode, setMode]         = useState('actual')
 
   // Date range — defaults wide open, user narrows via controls at top
-  const thisYear = new Date().getFullYear()
-  const [dateFrom, setDateFrom] = useState(`${thisYear - 3}-01-01`)
-  const [dateTo,   setDateTo]   = useState(`${thisYear + 3}-12-31`)
-  const [dateFilterOn, setDateFilterOn] = useState(false)
+  const today    = new Date()
+  const thisYear = today.getFullYear()
+  // Default to YTD: Jan 1 of current year → today
+  const ytdFrom  = `${thisYear}-01-01`
+  const ytdTo    = today.toISOString().slice(0, 10)
+  const [dateFrom, setDateFrom]     = useState(ytdFrom)
+  const [dateTo,   setDateTo]       = useState(ytdTo)
+  const [dateFilterOn, setDateFilterOn] = useState(true)
 
   // Status overrides (Close / Reopen) — stored locally like type overrides
   const LS_STATUS  = 'dde.ops.jobStatusOverrides'
@@ -1086,7 +1090,7 @@ export default function OpsJobsPage() {
       padding: '10px 16px', background: 'rgba(240,192,64,0.06)',
       border: '1px solid rgba(240,192,64,0.18)', borderRadius: 8, marginBottom: 16 }}>
       <span className="ops-small" style={{ color: 'var(--gold)', fontWeight: 700, whiteSpace: 'nowrap' }}>
-        Date Range Filter
+        {dateFrom === ytdFrom && dateTo === ytdTo ? 'YTD Filter' : 'Date Range Filter'}
       </span>
       <span className="ops-small ops-text-dim" style={{ whiteSpace: 'nowrap' }}>
         based on invoice dates
@@ -1101,8 +1105,9 @@ export default function OpsJobsPage() {
           <span className="ops-small ops-text-dim">to</span>
           <input type="date" className="ops-input" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ width: 148 }} title="Jobs ending on or before" />
           <button className="ops-btn ghost" style={{ fontSize: '0.78rem', padding: '3px 10px' }}
-            onClick={() => { setDateFrom(`${thisYear - 3}-01-01`); setDateTo(`${thisYear + 3}-12-31`) }}>
-            ↺ Reset
+            onClick={() => { setDateFrom(ytdFrom); setDateTo(ytdTo) }}
+            title="Reset to Year-to-Date">
+            ↺ YTD
           </button>
           <span className="ops-small ops-text-dim">
             <span style={{ color: 'var(--pos)' }}>{contractJobs.length} contract · {serviceJobs.length} service</span>
