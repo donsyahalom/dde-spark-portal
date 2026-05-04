@@ -50,6 +50,41 @@ function toNumber(v) {
   return Number.isFinite(n) ? n : null
 }
 
+// Sort period strings chronologically so the chart always runs oldest → newest.
+// Handles: "Jan 2026", "2026-Q1", "2026-01-15", "Wk 04-17", plain numbers.
+const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec']
+function periodToSortKey(period) {
+  const s = String(period).toLowerCase().trim()
+  // ISO date: 2026-04-17
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  // Year-month: 2026-04
+  if (/^\d{4}-\d{2}$/.test(s)) return s + '-01'
+  // Quarter: 2026-Q2 or Q2 2026
+  const qm = s.match(/(\d{4})[^\d]?q(\d)/i) || s.match(/q(\d)[^\d]?(\d{4})/i)
+  if (qm) {
+    const [year, q] = qm[1].length === 4 ? [qm[1], qm[2]] : [qm[2], qm[1]]
+    return `${year}-${String((Number(q) - 1) * 3 + 1).padStart(2, '0')}-01`
+  }
+  // "Jan 2026" or "January 2026"
+  const mm = s.match(/([a-z]+)[\s-]+(\d{4})/) || s.match(/(\d{4})[\s-]+([a-z]+)/)
+  if (mm) {
+    const [part1, part2] = [mm[1], mm[2]]
+    const monthPart = MONTHS.findIndex((m) => part1.startsWith(m)) >= 0 ? part1 : part2
+    const yearPart  = /^\d{4}$/.test(part1) ? part1 : part2
+    const mIdx = MONTHS.findIndex((m) => monthPart.startsWith(m))
+    if (mIdx >= 0) return `${yearPart}-${String(mIdx + 1).padStart(2, '0')}-01`
+  }
+  // Week: "Wk 04-17" — treat as-is, sort lexicographically
+  // Plain number or anything else: prefix with high value so it sorts last
+  return '9999-' + s
+}
+
+function sortedPoints(points) {
+  return [...points]
+    .filter((p) => p.period && p.value && toNumber(p.value) !== null)
+    .sort((a, b) => periodToSortKey(a.period).localeCompare(periodToSortKey(b.period)))
+}
+
 export default function OpsKpisPage() {
   const { loading: _opsLoading } = useOpsData()
 
@@ -256,9 +291,10 @@ export default function OpsKpisPage() {
           <div className="ops-grid-3">
             {customs.map((c, i) => {
               if (c.kind === 'timeseries') {
-                const labels  = c.points.map((p) => p.period)
-                const data    = c.points.map((p) => toNumber(p.value))
-                const last    = c.points[c.points.length - 1]
+                const sorted  = sortedPoints(c.points)
+                const labels  = sorted.map((p) => p.period)
+                const data    = sorted.map((p) => toNumber(p.value))
+                const last    = sorted[sorted.length - 1]
                 const isEditing = editIdx === i
                 return (
                   <div key={i} className="ops-kpi" style={{ position: 'relative' }}>
@@ -281,7 +317,19 @@ export default function OpsKpisPage() {
                             borderWidth: 2,
                           }],
                         }}
-                        options={sparkOpts}
+                        options={{
+                          ...sparkOpts,
+                          plugins: {
+                            ...sparkOpts.plugins,
+                            tooltip: {
+                              enabled: true,
+                              callbacks: {
+                                title: (items) => items[0]?.label || '',
+                                label: (ctx) => ctx.parsed.y,
+                              },
+                            },
+                          },
+                        }}
                       />
                     </OpsChartBox>
 
