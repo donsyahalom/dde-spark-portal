@@ -9,7 +9,6 @@ import {
   companyProductivity,
 } from '../../hooks/useOpsData'
 import { companyProductivityPeriod } from '../../lib/opsProductivity'
-import { supabase } from '../../lib/supabase'
 import { useOpsViewState } from '../../context/OpsViewStateContext'
 import { fmt, fmtK, pct } from '../../lib/opsFormat'
 import { moneyLineOpts, PALETTE } from '../../lib/opsChartOpts'
@@ -920,66 +919,68 @@ function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, 
 // usePeriodProductivity — fetches timecard hours + cost transactions
 // for the selected date window directly from Supabase, then computes
 // period-specific productivity using the cost-based approximation.
-// Only fires when dateFilterOn is true.  Returns null while loading.
-// Roll back: swap contractProd for periodProd in the card render below.
+// Only fires when dateFilterOn is true AND the live Supabase env vars
+// are present.  Degrades silently to null on UAT/mock path.
+// Roll back: change activeProd = periodProd ?? contractProd
+//         to activeProd = contractProd  (one line in render section)
 // ─────────────────────────────────────────────────────────────────────
+const LIVE_URL = String(import.meta.env.VITE_SUPABASE_URL || '')
+const USE_LIVE_DATA = String(import.meta.env.VITE_USE_LIVE_DATA || '').toLowerCase() === 'true'
+
 function usePeriodProductivity(jobs, dateFrom, dateTo, enabled) {
   const [periodProd, setPeriodProd] = useState(null)
   const [loading,    setLoading]    = useState(false)
 
   useEffect(() => {
-    if (!enabled || !dateFrom || !dateTo) {
+    // Only run on live path — UAT/mock has no real Supabase data to query
+    if (!enabled || !dateFrom || !dateTo || !USE_LIVE_DATA || !LIVE_URL) {
       setPeriodProd(null)
+      setLoading(false)
       return
     }
 
     let cancelled = false
     setLoading(true)
 
-    async function fetch() {
+    async function run() {
       try {
-        // Actual hours per job in the period
-        const { data: tcRows } = await supabase
-          .schema('sage')
-          .from('timecard_lines')
-          .select('job_recnum, hours_worked')
-          .gte('work_date', dateFrom)
-          .lte('work_date', dateTo)
-          .not('job_recnum', 'is', null)
+        // Lazy import so UAT bundle never evaluates the Supabase client
+        const { supabase } = await import('../../lib/supabase')
 
-        // Cost transactions per job in the period
-        const { data: ctRows } = await supabase
-          .schema('sage')
-          .from('job_cost_transactions')
-          .select('job_recnum, job_cost')
-          .gte('trans_date', dateFrom)
-          .lte('trans_date', dateTo)
-          .not('job_recnum', 'is', null)
+        const [tcRes, ctRes] = await Promise.all([
+          supabase.schema('sage').from('timecard_lines')
+            .select('job_recnum, hours_worked')
+            .gte('work_date', dateFrom).lte('work_date', dateTo)
+            .not('job_recnum', 'is', null),
+          supabase.schema('sage').from('job_cost_transactions')
+            .select('job_recnum, job_cost')
+            .gte('trans_date', dateFrom).lte('trans_date', dateTo)
+            .not('job_recnum', 'is', null),
+        ])
 
         if (cancelled) return
 
-        // Aggregate by job_recnum
         const byJob = {}
-        for (const r of (tcRows || [])) {
+        for (const r of (tcRes.data || [])) {
           if (!byJob[r.job_recnum]) byJob[r.job_recnum] = { job_recnum: r.job_recnum, period_actual_hrs: 0, period_cost: 0 }
           byJob[r.job_recnum].period_actual_hrs += Number(r.hours_worked || 0)
         }
-        for (const r of (ctRows || [])) {
+        for (const r of (ctRes.data || [])) {
           if (!byJob[r.job_recnum]) byJob[r.job_recnum] = { job_recnum: r.job_recnum, period_actual_hrs: 0, period_cost: 0 }
           byJob[r.job_recnum].period_cost += Number(r.job_cost || 0)
         }
 
-        const periodData = Object.values(byJob)
-        setPeriodProd(companyProductivityPeriod(periodData, jobs))
+        setPeriodProd(companyProductivityPeriod(Object.values(byJob), jobs))
       } catch (e) {
-        console.warn('[usePeriodProductivity] query failed:', e)
+        // eslint-disable-next-line no-console
+        console.warn('[usePeriodProductivity] query failed — falling back to weighted lifetime:', e)
         setPeriodProd(null)
       } finally {
         if (!cancelled) setLoading(false)
       }
     }
 
-    fetch()
+    run()
     return () => { cancelled = true }
   }, [enabled, dateFrom, dateTo, jobs])
 
