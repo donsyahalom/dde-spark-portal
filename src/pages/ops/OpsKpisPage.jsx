@@ -34,11 +34,8 @@ function loadCustoms() {
     const raw = localStorage.getItem(LS_KEY)
     if (raw) return JSON.parse(raw)
   } catch {}
-  // Seed defaults on first load — old data points from the mockup.
-  return [
-    { kind: 'single', name: 'Tools lost per quarter', value: '$2,140' },
-    { kind: 'single', name: 'RFIs open > 7 days',     value: '3' },
-  ]
+  // Seed defaults on first load — empty so user starts fresh
+  return []
 }
 function saveCustoms(list) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(list)) } catch {}
@@ -54,7 +51,7 @@ function toNumber(v) {
 }
 
 export default function OpsKpisPage() {
-  const { kpiSparks, loading: _opsLoading } = useOpsData()
+  const { loading: _opsLoading } = useOpsData()
 
   // Persisted custom-KPI list.
   const [customs, setCustoms] = useState(loadCustoms)
@@ -112,40 +109,6 @@ export default function OpsKpisPage() {
 
   return (
     <div>
-      {/*
-        Top row — built-in sparked KPIs from the mock data source.  These
-        are the company-level metrics the whole org sees.
-      */}
-      <div
-        className="ops-kpi-top"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-          gap: 16,
-          marginBottom: 20,
-        }}
-      >
-        {kpiSparks.map((k) => (
-          <OpsSectionCard key={k.id} title={k.label}>
-            <div className="ops-kpi-value" style={{ fontSize: '1.7rem', marginBottom: 10 }}>{k.value}</div>
-            <OpsChartBox size="sm">
-              <Line
-                data={{
-                  labels: k.data.map((_, i) => String(i)),
-                  datasets: [{
-                    data: k.data,
-                    borderColor: k.color,
-                    backgroundColor: 'transparent',
-                    tension: 0.3,
-                    borderWidth: 2,
-                  }],
-                }}
-                options={sparkOpts}
-              />
-            </OpsChartBox>
-          </OpsSectionCard>
-        ))}
-      </div>
 
       <OpsSectionCard
         title="Custom KPIs"
