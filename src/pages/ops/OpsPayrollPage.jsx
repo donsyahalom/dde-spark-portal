@@ -348,7 +348,7 @@ export default function OpsPayrollPage() {
                   <td style={{
                     fontWeight: 600, position: 'sticky', left: 0, zIndex: 2,
                     background: 'var(--bg-card)', whiteSpace: 'nowrap',
-                    maxWidth: 240,
+                    maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis',
                   }}>{g.label}</td>
                   {COLUMNS.map((c) => (
                     <td key={c.k} className="right" style={{ whiteSpace: 'nowrap' }}>{fmtCell(g[c.k], c.unit)}</td>
@@ -367,6 +367,7 @@ export default function OpsPayrollPage() {
                   <td style={{
                     position: 'sticky', left: 0, zIndex: 2,
                     background: 'var(--bg-card)', whiteSpace: 'nowrap',
+                    overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 240,
                   }}>Total — {groups.length} {mode === 'employee' ? 'people' : 'jobs'}</td>
                   {COLUMNS.map((c) => (
                     <td key={c.k} className="right" style={{ whiteSpace: 'nowrap' }}>{fmtCell(totals[c.k], c.unit)}</td>
