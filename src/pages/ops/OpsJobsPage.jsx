@@ -8,7 +8,6 @@ import {
   jobProductivity,
   companyProductivity,
 } from '../../hooks/useOpsData'
-import { companyProductivityPeriod } from '../../lib/opsProductivity'
 import { useOpsViewState } from '../../context/OpsViewStateContext'
 import { fmt, fmtK, pct } from '../../lib/opsFormat'
 import { moneyLineOpts, PALETTE } from '../../lib/opsChartOpts'
@@ -915,77 +914,7 @@ function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, 
 // Main page
 // ─────────────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────
-// usePeriodProductivity — fetches timecard hours + cost transactions
-// for the selected date window directly from Supabase, then computes
-// period-specific productivity using the cost-based approximation.
-// Only fires when dateFilterOn is true AND the live Supabase env vars
-// are present.  Degrades silently to null on UAT/mock path.
-// Roll back: change activeProd = periodProd ?? contractProd
-//         to activeProd = contractProd  (one line in render section)
-// ─────────────────────────────────────────────────────────────────────
-const LIVE_URL = String(import.meta.env.VITE_SUPABASE_URL || '')
-const USE_LIVE_DATA = String(import.meta.env.VITE_USE_LIVE_DATA || '').toLowerCase() === 'true'
 
-function usePeriodProductivity(jobs, dateFrom, dateTo, enabled) {
-  const [periodProd, setPeriodProd] = useState(null)
-  const [loading,    setLoading]    = useState(false)
-
-  useEffect(() => {
-    // Only run on live path — UAT/mock has no real Supabase data to query
-    if (!enabled || !dateFrom || !dateTo || !USE_LIVE_DATA || !LIVE_URL) {
-      setPeriodProd(null)
-      setLoading(false)
-      return
-    }
-
-    let cancelled = false
-    setLoading(true)
-
-    async function run() {
-      try {
-        // Lazy import so UAT bundle never evaluates the Supabase client
-        const { supabase } = await import('../../lib/supabase')
-
-        const [tcRes, ctRes] = await Promise.all([
-          supabase.schema('sage').from('timecard_lines')
-            .select('job_recnum, hours_worked')
-            .gte('work_date', dateFrom).lte('work_date', dateTo)
-            .not('job_recnum', 'is', null),
-          supabase.schema('sage').from('job_cost_transactions')
-            .select('job_recnum, job_cost')
-            .gte('trans_date', dateFrom).lte('trans_date', dateTo)
-            .not('job_recnum', 'is', null),
-        ])
-
-        if (cancelled) return
-
-        const byJob = {}
-        for (const r of (tcRes.data || [])) {
-          if (!byJob[r.job_recnum]) byJob[r.job_recnum] = { job_recnum: r.job_recnum, period_actual_hrs: 0, period_cost: 0 }
-          byJob[r.job_recnum].period_actual_hrs += Number(r.hours_worked || 0)
-        }
-        for (const r of (ctRes.data || [])) {
-          if (!byJob[r.job_recnum]) byJob[r.job_recnum] = { job_recnum: r.job_recnum, period_actual_hrs: 0, period_cost: 0 }
-          byJob[r.job_recnum].period_cost += Number(r.job_cost || 0)
-        }
-
-        setPeriodProd(companyProductivityPeriod(Object.values(byJob), jobs))
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.warn('[usePeriodProductivity] query failed — falling back to weighted lifetime:', e)
-        setPeriodProd(null)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    run()
-    return () => { cancelled = true }
-  }, [enabled, dateFrom, dateTo, jobs])
-
-  return { periodProd, loading }
-}
 
 export default function OpsJobsPage() {
   const { jobs, purchaseOrders, workOrders } = useOpsData()
@@ -1050,13 +979,6 @@ export default function OpsJobsPage() {
   const allContractJobs = useMemo(() => effectiveJobs.filter((j) => j.type === 'contract'), [effectiveJobs])
   const allServiceJobs  = useMemo(() => effectiveJobs.filter((j) => j.type === 'service'),  [effectiveJobs])
 
-  // Period productivity — cost-based approximation for the selected window.
-  // Falls back to weighted lifetime productivity when periodProd is null.
-  // NOTE: must be called after allContractJobs is defined (hook rules).
-  const { periodProd, loading: prodLoading } = usePeriodProductivity(
-    allContractJobs, dateFrom, dateTo, dateFilterOn,
-  )
-
   // 3. Apply date filter (affects cards too when on)
   const { filtered: contractJobs, totalWithDates: contractDatesAvail, outOfRange: contractOut = 0, totalWithoutDates: contractNoDates = 0 } = useMemo(() =>
     dateFilterOn
@@ -1089,8 +1011,6 @@ export default function OpsJobsPage() {
     () => companyProductivity(allContractJobs, prodFilterFrom, prodFilterTo),
     [allContractJobs, prodFilterFrom, prodFilterTo],
   )
-  // activeProd: use period calc when available, else weighted lifetime
-  const activeProd = periodProd ?? contractProd
   const svcProd      = useMemo(() => serviceProductivity(allServiceJobs, workOrders), [allServiceJobs, workOrders])
 
   // 5. Enrich service rows with WO stats
@@ -1243,15 +1163,15 @@ export default function OpsJobsPage() {
               : periodProd ? `Cost-based period estimate · ${dateFrom} → ${dateTo}`
               : `Day-weighted earned-value · ${dateFrom} → ${dateTo}`)
             : "Lifetime earned-value — all contract jobs"}>
-          <div className="ops-kpi-value" style={{ color: prodColor(activeProd.productivity) }}>
-            {prodLoading ? '…' : activeProd.productivity == null ? '—' : activeProd.productivity.toFixed(2)}
+          <div className="ops-kpi-value" style={{ color: prodColor(contractProd.productivity) }}>
+            {contractProd.productivity == null ? '—' : contractProd.productivity.toFixed(2)}
           </div>
-          {activeProd.actualHrs > 0 ? (
+          {contractProd.actualHrs > 0 ? (
             <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
-              {(activeProd.earnedHrs || 0).toLocaleString()} earned ÷ {(activeProd.actualHrs || 0).toLocaleString()} actual hrs
+              {(contractProd.earnedHrs || 0).toLocaleString()} earned ÷ {(contractProd.actualHrs || 0).toLocaleString()} actual hrs
               <div style={{ marginTop: 2 }}>
-                1.00 = on plan · {activeProd.jobCount} job{activeProd.jobCount !== 1 ? 's' : ''}
-                {activeProd.isPeriod ? ' · cost-based period estimate' : activeProd.isWeighted ? ' · day-weighted' : ' · all time'}
+                1.00 = on plan · {contractProd.jobCount} job{contractProd.jobCount !== 1 ? 's' : ''}
+                {false ? ' · cost-based period estimate' : contractProd.isWeighted ? ' · day-weighted' : ' · all time'}
               </div>
             </div>
           ) : (
@@ -1264,7 +1184,7 @@ export default function OpsJobsPage() {
 
         <OpsSectionCard title="Contract rev / field hour" subtitle={contractProd.isWeighted ? `Day-weighted · ${dateFrom} → ${dateTo}` : "Lifetime metric — all contract jobs"}>
           <div className="ops-kpi-value">
-            {activeProd.revenuePerHour == null ? '—' : `$${activeProd.revenuePerHour.toFixed(0)}`}
+            {contractProd.revenuePerHour == null ? '—' : `$${contractProd.revenuePerHour.toFixed(0)}`}
           </div>
           <div className="ops-small ops-text-dim" style={{ marginTop: 4 }}>
             {contractProd.revenuePerHour != null
