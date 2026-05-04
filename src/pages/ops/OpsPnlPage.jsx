@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Chart } from 'react-chartjs-2'
 import OpsChartBox from '../../components/ops/OpsChartBox'
 import OpsSectionCard from '../../components/ops/OpsSectionCard'
 import { useOpsData } from '../../hooks/useOpsData'
+import { useOpsViewState } from '../../context/OpsViewStateContext'
 import { fmt, fmtK, pct } from '../../lib/opsFormat'
 import { PALETTE } from '../../lib/opsChartOpts'
 
@@ -76,23 +77,77 @@ const incompleteBandPlugin = {
 
 export default function OpsPnlPage() {
   const { pnl, loading: _opsLoading } = useOpsData()
+  const { period } = useOpsViewState()
 
-  const lastIdx       = pnl.labels.length - 1
-  const lastLabel     = pnl.labels[lastIdx] ?? ''
-  const monthPartial  = useMemo(() => isLastMonthIncomplete(pnl), [pnl])
+  // ── Slice pnl arrays based on selected period ─────────────────────
+  // pnl_monthly returns all months for the fiscal year (or available data).
+  // MTD = current month only, QTD = current quarter, YTD = full year so far.
+  const filteredPnl = useMemo(() => {
+    if (!pnl.labels.length) return pnl
+    const now      = new Date()
+    const curMonth = now.getMonth() + 1   // 1-based
+    const curYear  = now.getFullYear()
+    const curQ     = Math.ceil(curMonth / 3)
+
+    // Determine which indices to keep based on period
+    let keepIndices = pnl.labels.map((_, i) => i)  // default: all (YTD)
+
+    if (period === 'mtd') {
+      // Only the current month — match by lastAcctPeriod if available
+      // else match the last label (always current month)
+      keepIndices = pnl.labels.reduce((acc, _, i) => {
+        // Use acct_period from the raw rows if available via lastAcctPeriod
+        // For now: keep only the last index (current/most recent month)
+        if (i === pnl.labels.length - 1) acc.push(i)
+        return acc
+      }, [])
+    } else if (period === 'qtd') {
+      // Current quarter months: Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec
+      const qStartMonth = (curQ - 1) * 3 + 1  // first month of current quarter
+      const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+      keepIndices = pnl.labels.reduce((acc, label, i) => {
+        const mIdx = MONTH_ABBR.findIndex((m) => label.startsWith(m))
+        const mNum = mIdx >= 0 ? mIdx + 1 : null
+        if (mNum && mNum >= qStartMonth && mNum <= curMonth) acc.push(i)
+        return acc
+      }, [])
+      // Fallback: last 3 indices if month matching fails
+      if (!keepIndices.length) keepIndices = pnl.labels.map((_, i) => i).slice(-3)
+    }
+    // ytd: keep all
+
+    const slice = (arr) => keepIndices.map((i) => arr[i] ?? 0)
+    return {
+      ...pnl,
+      labels:  keepIndices.map((i) => pnl.labels[i]),
+      revenue: slice(pnl.revenue),
+      cogs:    slice(pnl.cogs),
+      burden:  slice(pnl.burden),
+      gp:      slice(pnl.gp),
+      overhead:slice(pnl.overhead),
+      net:     slice(pnl.net),
+      gpPct:   slice(pnl.gpPct),
+      priorRevenue: slice(pnl.priorRevenue || []),
+      goalRevenue:  slice(pnl.goalRevenue  || []),
+    }
+  }, [pnl, period])
+
+  const lastIdx       = filteredPnl.labels.length - 1
+  const lastLabel     = filteredPnl.labels[lastIdx] ?? ''
+  const monthPartial  = useMemo(() => isLastMonthIncomplete(filteredPnl), [pnl])
 
   const AXIS = 'rgba(255,255,255,0.82)'
   const GRID = 'rgba(240,192,64,0.14)'
 
   const data = {
-    labels: pnl.labels,
+    labels: filteredPnl.labels,
     datasets: [
-      { type: 'bar',  label: 'Revenue',     data: pnl.revenue,  backgroundColor: PALETTE.blue,   yAxisID: 'y' },
-      { type: 'bar',  label: 'Direct Cost', data: pnl.cogs,     backgroundColor: PALETTE.red,    yAxisID: 'y' },
-      { type: 'bar',  label: 'Overhead',    data: pnl.overhead, backgroundColor: PALETTE.amber,  yAxisID: 'y' },
-      { type: 'line', label: 'Net Profit',  data: pnl.net,      borderColor: PALETTE.purple,
+      { type: 'bar',  label: 'Revenue',     data: filteredPnl.revenue,  backgroundColor: PALETTE.blue,   yAxisID: 'y' },
+      { type: 'bar',  label: 'Direct Cost', data: filteredPnl.cogs,     backgroundColor: PALETTE.red,    yAxisID: 'y' },
+      { type: 'bar',  label: 'Overhead',    data: filteredPnl.overhead, backgroundColor: PALETTE.amber,  yAxisID: 'y' },
+      { type: 'line', label: 'Net Profit',  data: filteredPnl.net,      borderColor: PALETTE.purple,
         backgroundColor: 'transparent', tension: 0.3, borderWidth: 2.5, yAxisID: 'y' },
-      { type: 'line', label: 'GP Margin %', data: pnl.gpPct,    borderColor: PALETTE.green,
+      { type: 'line', label: 'GP Margin %', data: filteredPnl.gpPct,    borderColor: PALETTE.green,
         backgroundColor: 'transparent', borderDash: [4, 4], tension: 0.3, borderWidth: 2, yAxisID: 'y1' },
     ],
   }
@@ -123,12 +178,12 @@ export default function OpsPnlPage() {
             if (ctx.datasetIndex !== 0) return null
             const i = ctx.dataIndex
             const lines = [
-              `Revenue:     ${fmtK(pnl.revenue[i])}`,
-              `Direct Cost: ${fmtK(pnl.cogs[i])}`,
-              `GP $:        ${fmtK(pnl.gp[i])}`,
-              `GP margin %: ${pct(pnl.gpPct[i])}`,
-              `Overhead:    ${fmtK(pnl.overhead[i])}`,
-              `Net Profit:  ${fmtK(pnl.net[i])}`,
+              `Revenue:     ${fmtK(filteredPnl.revenue[i])}`,
+              `Direct Cost: ${fmtK(filteredPnl.cogs[i])}`,
+              `GP $:        ${fmtK(filteredPnl.gp[i])}`,
+              `GP margin %: ${pct(filteredPnl.gpPct[i])}`,
+              `Overhead:    ${fmtK(filteredPnl.overhead[i])}`,
+              `Net Profit:  ${fmtK(filteredPnl.net[i])}`,
             ]
             if (monthPartial && i === lastIdx) {
               lines.push('⚠ Partial month — figures not complete')
@@ -155,11 +210,11 @@ export default function OpsPnlPage() {
   }
 
   const totals = {
-    rev:  pnl.revenue.reduce((a, b) => a + b, 0),
-    cogs: pnl.cogs.reduce((a, b) => a + b, 0),
-    gp:   pnl.gp.reduce((a, b) => a + b, 0),
-    oh:   pnl.overhead.reduce((a, b) => a + b, 0),
-    net:  pnl.net.reduce((a, b) => a + b, 0),
+    rev:  filteredPnl.revenue.reduce((a, b) => a + b, 0),
+    cogs: filteredPnl.cogs.reduce((a, b) => a + b, 0),
+    gp:   filteredPnl.gp.reduce((a, b) => a + b, 0),
+    oh:   filteredPnl.overhead.reduce((a, b) => a + b, 0),
+    net:  filteredPnl.net.reduce((a, b) => a + b, 0),
   }
   const gpPct  = totals.rev ? (totals.gp  / totals.rev) * 100 : 0
   const netPct = totals.rev ? (totals.net / totals.rev) * 100 : 0
@@ -242,7 +297,7 @@ export default function OpsPnlPage() {
             </tr>
           </thead>
           <tbody>
-            {pnl.labels.map((m, i) => {
+            {filteredPnl.labels.map((m, i) => {
               const isPartial = monthPartial && i === lastIdx
               return (
                 <tr
@@ -259,14 +314,14 @@ export default function OpsPnlPage() {
                       }}>⚠ partial</span>
                     )}
                   </td>
-                  <td className="right">{fmt(pnl.revenue[i])}</td>
-                  <td className="right">{fmt(pnl.cogs[i])}</td>
-                  <td className="right ops-text-dim">{fmt(pnl.burden[i])}</td>
-                  <td className="right">{fmt(pnl.gp[i])}</td>
-                  <td className="right">{pct(pnl.gpPct[i])}</td>
-                  <td className="right">{fmt(pnl.overhead[i])}</td>
-                  <td className={`right ${pnl.net[i] >= 0 ? 'ops-text-pos' : 'ops-text-neg'}`}>
-                    {fmt(pnl.net[i])}
+                  <td className="right">{fmt(filteredPnl.revenue[i])}</td>
+                  <td className="right">{fmt(filteredPnl.cogs[i])}</td>
+                  <td className="right ops-text-dim">{fmt(filteredPnl.burden[i])}</td>
+                  <td className="right">{fmt(filteredPnl.gp[i])}</td>
+                  <td className="right">{pct(filteredPnl.gpPct[i])}</td>
+                  <td className="right">{fmt(filteredPnl.overhead[i])}</td>
+                  <td className={`right ${filteredPnl.net[i] >= 0 ? 'ops-text-pos' : 'ops-text-neg'}`}>
+                    {fmt(filteredPnl.net[i])}
                   </td>
                 </tr>
               )
@@ -275,7 +330,7 @@ export default function OpsPnlPage() {
               <td>Total</td>
               <td className="right">{fmt(totals.rev)}</td>
               <td className="right">{fmt(totals.cogs)}</td>
-              <td className="right ops-text-dim">{fmt(pnl.burden.reduce((a, b) => a + b, 0))}</td>
+              <td className="right ops-text-dim">{fmt(filteredPnl.burden.reduce((a, b) => a + b, 0))}</td>
               <td className="right">{fmt(totals.gp)}</td>
               <td className="right">{pct(gpPct)}</td>
               <td className="right">{fmt(totals.oh)}</td>
