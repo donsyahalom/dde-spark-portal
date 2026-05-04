@@ -189,9 +189,9 @@ export default function OpsPayrollPage() {
     return t
   }, [groups])
 
-  const primaryHeader   = mode === 'employee' ? 'Employee' : 'Job'
-  const secondaryHeader = mode === 'employee' ? 'Trade'    : 'Job name'
-  const COLUMNS         = mode === 'employee' ? COLUMNS_EMP : COLUMNS_JOB
+  // Single identity column — employee name or job name (no secondary column)
+  const primaryHeader = mode === 'employee' ? 'Employee' : 'Job'
+  const COLUMNS       = mode === 'employee' ? COLUMNS_EMP : COLUMNS_JOB
 
   return (
     <div>
@@ -269,38 +269,82 @@ export default function OpsPayrollPage() {
           </div>
         }
       >
-        <div style={{ overflowX: 'auto' }}>
-          <table className="ops-table">
+        {/* Top mirror scrollbar */}
+        <div
+          id="pr-top-scroll"
+          style={{ overflowX: 'auto', height: 16, marginBottom: 2 }}
+          onScroll={(e) => {
+            const main = document.getElementById('pr-main-scroll')
+            if (main) main.scrollLeft = e.target.scrollLeft
+          }}
+        >
+          <div id="pr-top-inner" style={{ height: 1 }} />
+        </div>
+        <div
+          id="pr-main-scroll"
+          style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '72vh' }}
+          onScroll={(e) => {
+            const top = document.getElementById('pr-top-scroll')
+            if (top) top.scrollLeft = e.target.scrollLeft
+            const inner = document.getElementById('pr-top-inner')
+            if (inner) inner.style.width = e.target.scrollWidth + 'px'
+          }}
+        >
+          <table
+            className="ops-table"
+            style={{ width: 'max-content', minWidth: '100%' }}
+            ref={(el) => {
+              if (el) {
+                const inner = document.getElementById('pr-top-inner')
+                if (inner) inner.style.width = el.scrollWidth + 'px'
+              }
+            }}
+          >
             <thead>
               <tr>
-                <th>{primaryHeader}</th>
-                <th>{secondaryHeader}</th>
-                {COLUMNS.map((c) => <th key={c.k} className="right">{c.h}</th>)}
+                <th style={{
+                  position: 'sticky', top: 0, left: 0, zIndex: 4,
+                  background: 'rgba(18,22,28,0.98)',
+                  boxShadow: '0 1px 0 rgba(240,192,64,0.2)',
+                }}>{primaryHeader}</th>
+                {COLUMNS.map((c) => (
+                  <th key={c.k} className="right" style={{
+                    position: 'sticky', top: 0, zIndex: 3,
+                    background: 'rgba(18,22,28,0.98)',
+                    boxShadow: '0 1px 0 rgba(240,192,64,0.2)',
+                    whiteSpace: 'nowrap',
+                  }}>{c.h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {groups.map((g) => (
                 <tr key={g.key}>
-                  <td style={{ fontWeight: 600 }}>{g.label}</td>
-                  <td className="ops-text-dim">{g.sub}</td>
+                  <td style={{
+                    fontWeight: 600, position: 'sticky', left: 0, zIndex: 2,
+                    background: 'var(--bg-card)', whiteSpace: 'nowrap',
+                    maxWidth: 240,
+                  }}>{g.label}</td>
                   {COLUMNS.map((c) => (
-                    <td key={c.k} className="right">{fmtCell(g[c.k], c.unit)}</td>
+                    <td key={c.k} className="right" style={{ whiteSpace: 'nowrap' }}>{fmtCell(g[c.k], c.unit)}</td>
                   ))}
                 </tr>
               ))}
               {!groups.length && (
                 <tr>
-                  <td colSpan={COLUMNS.length + 2} className="center ops-text-dim" style={{ padding: '24px 0' }}>
+                  <td colSpan={COLUMNS.length + 1} className="center ops-text-dim" style={{ padding: '24px 0' }}>
                     No payroll rows match the current filters.
                   </td>
                 </tr>
               )}
               {groups.length > 0 && (
                 <tr style={{ borderTop: '2px solid var(--border-bright)', fontWeight: 700 }}>
-                  <td>Total</td>
-                  <td className="ops-text-dim">{groups.length} {mode === 'employee' ? 'people' : 'jobs'}</td>
+                  <td style={{
+                    position: 'sticky', left: 0, zIndex: 2,
+                    background: 'var(--bg-card)', whiteSpace: 'nowrap',
+                  }}>Total — {groups.length} {mode === 'employee' ? 'people' : 'jobs'}</td>
                   {COLUMNS.map((c) => (
-                    <td key={c.k} className="right">{fmtCell(totals[c.k], c.unit)}</td>
+                    <td key={c.k} className="right" style={{ whiteSpace: 'nowrap' }}>{fmtCell(totals[c.k], c.unit)}</td>
                   ))}
                 </tr>
               )}
