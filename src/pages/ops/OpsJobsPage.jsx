@@ -918,7 +918,9 @@ function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, 
 
 
 export default function OpsJobsPage() {
-  const { jobs, purchaseOrders, workOrders } = useOpsData()
+  const _ops = useOpsData()
+  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
+  const { jobs, purchaseOrders, workOrders } = _ops
   const { setJobTypeOverride, applyJobTypeOverrides } = useOpsViewState()
 
   // ── UI state ────────────────────────────────────────────────────────

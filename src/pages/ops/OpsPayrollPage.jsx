@@ -90,7 +90,9 @@ function fmtCell(val, unit) {
 }
 
 export default function OpsPayrollPage() {
-  const { payrollLines, jobs } = useOpsData()
+  const _ops = useOpsData()
+  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
+  const { payrollLines, jobs } = _ops
   const [mode, setMode] = useState('employee') // 'employee' | 'job'
   const [q, setQ]       = useState('')
 

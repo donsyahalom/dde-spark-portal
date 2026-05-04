@@ -11,7 +11,9 @@ const BUCKETS = [
 ]
 
 export default function OpsApPage() {
-  const { apInvoices } = useOpsData()
+  const _ops = useOpsData()
+  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
+  const { apInvoices } = _ops
 
   const sums = BUCKETS.map((b) =>
     apInvoices.filter((i) => i.ageDays >= b.min && i.ageDays <= b.max).reduce((a, i) => a + i.balance, 0),

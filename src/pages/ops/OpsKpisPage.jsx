@@ -54,7 +54,9 @@ function toNumber(v) {
 }
 
 export default function OpsKpisPage() {
-  const { kpiSparks } = useOpsData()
+  const _ops = useOpsData()
+  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
+  const { kpiSparks } = _ops
 
   // Persisted custom-KPI list.
   const [customs, setCustoms] = useState(loadCustoms)

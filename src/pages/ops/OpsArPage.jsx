@@ -190,7 +190,9 @@ function AgingTable({ title, rows, bucketLabels, retainageByCust, emptyMsg }) {
 }
 
 export default function OpsArPage() {
-  const { arInvoices, arEmailDefaults, jobs } = useOpsData()
+  const _ops = useOpsData()
+  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
+  const { arInvoices, arEmailDefaults, jobs } = _ops
   const { currentUser } = useAuth()
   const { applyJobTypeOverrides } = useOpsViewState()
   const isAdmin = !!currentUser?.is_admin
