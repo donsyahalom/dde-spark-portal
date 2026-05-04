@@ -10,31 +10,43 @@ import { moneyLineOpts, PALETTE } from '../../lib/opsChartOpts'
 // so "by employee" and "by job" stay in sync — adding a new burden
 // component only means: add it to computePayroll() + list it here.
 const SUM_FIELDS = [
-  'regHrs','otHrs','sickHrs','vacHrs','holHrs','perDiem',
+  'regHrs','otHrs','sickHrs','vacHrs','holHrs',
   'regPay','otPay','sickPay','vacPay','holPay','wages',
   'fica','futa','suta','wc','liability','retirement','health',
   'totalBurden','totalCost',
 ]
 
-// Columns render left-to-right in this order.  `k` is the aggregated
-// field key, `h` is the header label, `unit` controls formatting.
-const COLUMNS = [
-  { k:'regHrs',     h:'Reg hrs',   unit:'hrs' },
-  { k:'otHrs',      h:'OT',        unit:'hrs' },
-  { k:'sickHrs',    h:'Sick',      unit:'hrs' },
-  { k:'vacHrs',     h:'Vac',       unit:'hrs' },
-  { k:'holHrs',     h:'Hol',       unit:'hrs' },
-  { k:'perDiem',    h:'Per diem',  unit:'$'   },
+// Columns — two variants:
+//   COLUMNS_EMP  : by-employee view (hours summary only — OT/sick/vac/hol
+//                  are rolled up in the gross-wages card, not per column)
+//   COLUMNS_JOB  : by-job view includes full hours breakdown so you can
+//                  see exactly what type of time hit each job
+const COLUMNS_BASE = [
   { k:'wages',      h:'Gross wages', unit:'$' },
-  { k:'fica',       h:'FICA',      unit:'$'   },
-  { k:'futa',       h:'FUTA',      unit:'$'   },
-  { k:'suta',       h:'SUTA',      unit:'$'   },
-  { k:'wc',         h:'WC',        unit:'$'   },
-  { k:'liability',  h:'GL',        unit:'$'   },
-  { k:'retirement', h:'Retire',    unit:'$'   },
-  { k:'health',     h:'Health',    unit:'$'   },
-  { k:'totalBurden',h:'Burden tot',unit:'$'   },
-  { k:'totalCost',  h:'True cost', unit:'$'   },
+  { k:'fica',       h:'FICA',        unit:'$' },
+  { k:'futa',       h:'FUTA',        unit:'$' },
+  { k:'suta',       h:'SUTA',        unit:'$' },
+  { k:'wc',         h:'WC',          unit:'$' },
+  { k:'liability',  h:'GL',          unit:'$' },
+  { k:'retirement', h:'Retire',      unit:'$' },
+  { k:'health',     h:'Health',      unit:'$' },
+  { k:'totalBurden',h:'Burden tot',  unit:'$' },
+  { k:'totalCost',  h:'True cost',   unit:'$' },
+]
+
+const COLUMNS_EMP = [
+  { k:'regHrs',  h:'Reg hrs', unit:'hrs' },
+  { k:'otHrs',   h:'OT hrs',  unit:'hrs' },
+  ...COLUMNS_BASE,
+]
+
+const COLUMNS_JOB = [
+  { k:'regHrs',  h:'Reg hrs',  unit:'hrs' },
+  { k:'otHrs',   h:'OT hrs',   unit:'hrs' },
+  { k:'sickHrs', h:'Sick hrs', unit:'hrs' },
+  { k:'vacHrs',  h:'Vac hrs',  unit:'hrs' },
+  { k:'holHrs',  h:'Hol hrs',  unit:'hrs' },
+  ...COLUMNS_BASE,
 ]
 
 function emptyTotals() {
@@ -177,13 +189,14 @@ export default function OpsPayrollPage() {
     return t
   }, [groups])
 
-  const primaryHeader = mode === 'employee' ? 'Employee' : 'Job'
+  const primaryHeader   = mode === 'employee' ? 'Employee' : 'Job'
   const secondaryHeader = mode === 'employee' ? 'Trade'    : 'Job name'
+  const COLUMNS         = mode === 'employee' ? COLUMNS_EMP : COLUMNS_JOB
 
   return (
     <div>
       {/* Summary cards — quick read on total field cost + burden share. */}
-      <div className="ops-grid-4">
+      <div className="ops-grid-3">
         <OpsSectionCard title="Gross wages">
           <div className="ops-kpi-value">{fmt(totals.wages)}</div>
           <div className="ops-small ops-text-dim">
@@ -196,13 +209,9 @@ export default function OpsPayrollPage() {
             {totals.wages ? ((totals.totalBurden / totals.wages) * 100).toFixed(1) : 0}% on wages
           </div>
         </OpsSectionCard>
-        <OpsSectionCard title="Per diem">
-          <div className="ops-kpi-value">{fmt(totals.perDiem)}</div>
-          <div className="ops-small ops-text-dim">non-burdened, carried through as-is</div>
-        </OpsSectionCard>
         <OpsSectionCard title="True labor cost">
           <div className="ops-kpi-value">{fmt(totals.totalCost)}</div>
-          <div className="ops-small ops-text-dim">wages + burden + per diem</div>
+          <div className="ops-small ops-text-dim">wages + burden</div>
         </OpsSectionCard>
       </div>
 
