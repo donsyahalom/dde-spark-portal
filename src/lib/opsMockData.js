@@ -485,40 +485,8 @@ export function computePayroll(line) {
 // --------------------------------------------------------------------
 //  Productivity helpers
 // --------------------------------------------------------------------
-// Earned-value style productivity for a single job:
-//   earnedHrs = budgetLaborHrs × pctCmp / 100
-//   productivity = earnedHrs / actualLaborHrs
-// 1.00 = on plan.  > 1 = ahead (fewer actual hours than earned).
-// < 1 = behind (actual hours exceed what % complete would justify).
-// Excludes service jobs (no meaningful %cmp on T&M work).
-export function jobProductivity(j) {
-  if (!j || j.type === 'service' || !j.actualLaborHrs) {
-    return { earnedHrs: 0, productivity: null }
-  }
-  const earnedHrs = j.budgetLaborHrs * (j.pctCmp / 100)
-  return {
-    earnedHrs,
-    productivity: +(earnedHrs / j.actualLaborHrs).toFixed(2),
-    revenuePerHour: +(j.revenue / j.actualLaborHrs).toFixed(2),
-  }
-}
-
-// Company-wide productivity = total earned hrs / total actual hrs
-// across contract jobs.  Same math as jobProductivity, just rolled up.
-export function companyProductivity(jobs) {
-  const contract = jobs.filter((j) => j.type === 'contract' && j.actualLaborHrs > 0)
-  const earnedHrs = contract.reduce((s, j) => s + j.budgetLaborHrs * (j.pctCmp / 100), 0)
-  const actualHrs = contract.reduce((s, j) => s + j.actualLaborHrs, 0)
-  const revenue   = contract.reduce((s, j) => s + j.revenue, 0)
-  const productivity = actualHrs ? +(earnedHrs / actualHrs).toFixed(2) : null
-  return {
-    earnedHrs: Math.round(earnedHrs),
-    actualHrs,
-    productivity,
-    revenuePerHour: actualHrs ? +(revenue / actualHrs).toFixed(2) : null,
-    jobCount: contract.length,
-  }
-}
+// Productivity functions moved to src/lib/opsProductivity.js
+export { jobProductivity, companyProductivity } from './opsProductivity.js'
 
 // --------------------------------------------------------------------
 //  A/R email report settings (default; persisted via localStorage on

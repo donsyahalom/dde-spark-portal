@@ -177,8 +177,8 @@ function groupByName(jobs) {
       if (!e._pctCmpNumerator) e._pctCmpNumerator = (e._grouped[0].pctCmp || 0) * (e._grouped[0].revenue || 0)
       e._pctCmpNumerator += (j.pctCmp || 0) * (j.revenue || 0)
       e.pctCmp = e.revenue > 0 ? e._pctCmpNumerator / e.revenue : 0
-      // Recompute productivity
-      e.productivity = (e.budgetLaborHrs > 0 && e.pctCmp > 0 && e.actualLaborHrs > 0)
+      // Recompute productivity — same thresholds as jobProductivity()
+      e.productivity = (e.budgetLaborHrs > 0 && e.pctCmp >= 5 && e.actualLaborHrs >= 40)
         ? +((e.budgetLaborHrs * (e.pctCmp / 100)) / e.actualLaborHrs).toFixed(2)
         : null
       e._allNums.push(j.jobNum || j.num)

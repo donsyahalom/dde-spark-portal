@@ -15,10 +15,9 @@ import {
   PURCHASE_ORDERS,
   WORK_ORDERS,
   buildWeekly,
-  companyProductivity,
   computePayroll,
-  jobProductivity,
 } from '../lib/opsMockData'
+import { jobProductivity, companyProductivity } from '../lib/opsProductivity'
 import { useOpsDataLive } from './useOpsDataLive'
 
 // Feature flag — set VITE_USE_LIVE_DATA=true in Netlify env (Builds
