@@ -7,9 +7,7 @@ import { fmtK } from '../../lib/opsFormat'
 import { moneyLineOpts, PALETTE } from '../../lib/opsChartOpts'
 
 export default function OpsCashflowPage() {
-  const _ops = useOpsData()
-  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
-  const { cashflow } = _ops
+  const { cashflow, loading: _opsLoading } = useOpsData()
   const { basis, setBasis, appliedSummary, fallbackAvg } = useOpsCashflowBasis()
 
   const data = {
@@ -138,6 +136,8 @@ function BasisBanner() {
       </span>
     )
   }
+
+  if (_opsLoading) return <div style={{ padding: '40px 20px', color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem', textAlign: 'center' }}>Loading data…</div>
 
   return (
     <div className={`ops-banner ${cls}`}>

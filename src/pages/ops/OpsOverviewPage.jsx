@@ -34,9 +34,7 @@ const fmt$ = (n) =>
   n == null ? '—' : `$${Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
 
 export default function OpsOverviewPage() {
-  const _ops = useOpsData()
-  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
-  const { kpis, pnl, jobs } = _ops
+  const { kpis, pnl, jobs, loading: _opsLoading } = useOpsData()
 
   // 2nd row of Overview cards
   const prod       = companyProductivity(jobs)
@@ -85,6 +83,8 @@ export default function OpsOverviewPage() {
     : prod.productivity >= 1.0 ? 'var(--pos)'
     : prod.productivity >= 0.9 ? 'var(--gold)'
     : 'var(--neg)'
+
+  if (_opsLoading) return <div style={{ padding: '40px 20px', color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem', textAlign: 'center' }}>Loading data…</div>
 
   return (
     <div>

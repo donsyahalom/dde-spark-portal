@@ -90,8 +90,7 @@ function fmtCell(val, unit) {
 }
 
 export default function OpsPayrollPage() {
-  const _ops = useOpsData()
-  const { payrollLines, jobs } = _ops
+  const { payrollLines, jobs, loading: _opsLoading } = useOpsData()
   const [mode, setMode] = useState('employee') // 'employee' | 'job'
   const [q, setQ]       = useState('')
 
@@ -199,8 +198,8 @@ export default function OpsPayrollPage() {
   const primaryHeader = mode === 'employee' ? 'Employee' : 'Job'
   const COLUMNS       = mode === 'employee' ? COLUMNS_EMP : COLUMNS_JOB
 
-  // Show loading state instead of mock data flash
-  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
+
+  if (_opsLoading) return <div style={{ padding: '40px 20px', color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem', textAlign: 'center' }}>Loading data…</div>
 
   return (
     <div>

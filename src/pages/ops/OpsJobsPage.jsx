@@ -918,8 +918,7 @@ function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, 
 
 
 export default function OpsJobsPage() {
-  const _ops = useOpsData()
-  const { jobs, purchaseOrders, workOrders } = _ops
+  const { jobs, purchaseOrders, workOrders, loading: _opsLoading } = useOpsData()
   const { setJobTypeOverride, applyJobTypeOverrides } = useOpsViewState()
 
   // ── UI state ────────────────────────────────────────────────────────
@@ -1152,8 +1151,8 @@ export default function OpsJobsPage() {
   )
 
   // ── Render ─────────────────────────────────────────────────────────
-  // Show loading state instead of mock data flash
-  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
+
+  if (_opsLoading) return <div style={{ padding: '40px 20px', color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem', textAlign: 'center' }}>Loading data…</div>
 
   return (
     <div>
