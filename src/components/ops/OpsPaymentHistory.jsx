@@ -30,11 +30,20 @@ export default function OpsPaymentHistory() {
   const { applyPaymentHistory } = useOpsCashflowBasis()
   const navigate = useNavigate()
 
-  const [activeMode, setActiveMode] = useState('active')     // 'active' | 'all' | 'inactive'
-  const [period, setPeriod]         = useState('12')         // '6' | '12' | '24' | '36' | 'all'
-  const [topN, setTopN]             = useState(8)
-  const [trim, setTrim]             = useState(true)
-  const [toast, setToast]           = useState(null)
+  const [activeMode, setActiveMode]       = useState('active')
+  const [period, setPeriod]               = useState('12')
+  const [topN, setTopN]                   = useState(8)
+  const [trim, setTrim]                   = useState(true)
+  const [toast, setToast]                 = useState(null)
+  const [customerFilter, setCustomerFilter] = useState('')    // '' = all customers
+
+  // Sorted unique customer names for the dropdown
+  const customerOptions = useMemo(() =>
+    [...paymentHistory]
+      .sort((a, b) => b.paid - a.paid)
+      .map((c) => c.name),
+    [paymentHistory],
+  )
 
   const { rows, stats, buckets, counts } = useMemo(() => {
     let rows = paymentHistory.filter((c) => {
@@ -42,13 +51,15 @@ export default function OpsPaymentHistory() {
       if (activeMode === 'inactive') return !c.active
       return true
     })
+    // Customer-specific filter — overrides topN when set
+    if (customerFilter) rows = rows.filter((c) => c.name === customerFilter)
     const cap = period === 'all' ? Infinity : parseInt(period, 10)
     const rowsWithDeltas = rows
       .map((r) => ({ ...r, _deltas: r.deltas.slice(Math.max(0, r.deltas.length - cap)) }))
       .filter((r) => r._deltas.length > 0)
 
     rowsWithDeltas.sort((a, b) => b.paid - a.paid)
-    const topRows = rowsWithDeltas.slice(0, Math.max(1, topN))
+    const topRows = customerFilter ? rowsWithDeltas : rowsWithDeltas.slice(0, Math.max(1, topN))
 
     const combined = topRows.flatMap((r) => r._deltas)
     const sampleBase = combined.length
@@ -79,7 +90,7 @@ export default function OpsPaymentHistory() {
     const counts = bucketDefs.map((b) => working.filter((d) => d >= b.lo && d <= b.hi).length)
 
     return { rows: topRows, stats, buckets: bucketDefs, counts }
-  }, [paymentHistory, activeMode, period, topN, trim])
+  }, [paymentHistory, activeMode, period, topN, trim, customerFilter])
 
   const applyHandler = () => {
     applyPaymentHistory(rows, stats.avg)
@@ -124,6 +135,17 @@ export default function OpsPaymentHistory() {
               <option value="6">Last 6 months</option>
               <option value="36">Last 36 months</option>
               <option value="all">All time</option>
+            </select>
+            <select
+              className="ops-select"
+              value={customerFilter}
+              onChange={(e) => setCustomerFilter(e.target.value)}
+              style={{ maxWidth: 200 }}
+            >
+              <option value="">All customers</option>
+              {customerOptions.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
             </select>
             <label className="ops-checkbox" style={{ gap: 8 }}>
               <span style={{ fontSize: '0.68rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--white-dim)' }}>Top</span>
