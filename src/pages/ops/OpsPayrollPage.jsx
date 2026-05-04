@@ -16,11 +16,11 @@ const SUM_FIELDS = [
   'totalBurden','totalCost',
 ]
 
-// Columns — two variants:
-//   COLUMNS_EMP  : by-employee view (hours summary only — OT/sick/vac/hol
-//                  are rolled up in the gross-wages card, not per column)
-//   COLUMNS_JOB  : by-job view includes full hours breakdown so you can
-//                  see exactly what type of time hit each job
+// COLUMNS_EMP: includes sick/vac/hol — employee view merges job-coded +
+//              non-job time so all hour types roll up per employee.
+// COLUMNS_JOB: reg + OT only — sick/vac/hol carry NULL job_recnum in Sage
+//              (pay_type 4/5/6) so they cannot appear in a per-job breakdown.
+//              They show in By Employee view via the (Non-Job) synthetic row.
 const COLUMNS_BASE = [
   { k:'wages',      h:'Gross wages', unit:'$' },
   { k:'fica',       h:'FICA',        unit:'$' },
@@ -35,17 +35,17 @@ const COLUMNS_BASE = [
 ]
 
 const COLUMNS_EMP = [
-  { k:'regHrs',  h:'Reg hrs', unit:'hrs' },
-  { k:'otHrs',   h:'OT hrs',  unit:'hrs' },
-  ...COLUMNS_BASE,
-]
-
-const COLUMNS_JOB = [
   { k:'regHrs',  h:'Reg hrs',  unit:'hrs' },
   { k:'otHrs',   h:'OT hrs',   unit:'hrs' },
   { k:'sickHrs', h:'Sick hrs', unit:'hrs' },
   { k:'vacHrs',  h:'Vac hrs',  unit:'hrs' },
   { k:'holHrs',  h:'Hol hrs',  unit:'hrs' },
+  ...COLUMNS_BASE,
+]
+
+const COLUMNS_JOB = [
+  { k:'regHrs', h:'Reg hrs', unit:'hrs' },
+  { k:'otHrs',  h:'OT hrs',  unit:'hrs' },
   ...COLUMNS_BASE,
 ]
 
@@ -246,7 +246,9 @@ export default function OpsPayrollPage() {
 
       <OpsSectionCard
         title="Payroll register"
-        subtitle={`Aggregated by ${mode === 'employee' ? 'employee (grouping all jobs they worked)' : 'job (grouping all crew on that job)'}. Burden includes FICA, FUTA, SUTA, workers comp, liability, retirement match, health.`}
+        subtitle={mode === 'employee'
+          ? 'By employee — includes job-coded time plus sick/vac/holiday via Non-Job row. Burden = FICA, FUTA, SUTA, WC, GL, retirement, health.'
+          : 'By job — reg and OT only. Sick/vacation/holiday carry no job code in Sage so they only appear in the By Employee view.'}
         right={
           <div className="ops-toolbar">
             <div className="ops-toggle">
