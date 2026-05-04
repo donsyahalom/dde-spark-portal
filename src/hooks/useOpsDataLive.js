@@ -108,6 +108,7 @@ function enrichJob(j) {
     completeDate:  j.completeDate  || null,   // COALESCE(lastInv, sagComplete) from view
     contractDate:  j.contractDate  || null,
     jobNum:        j.jobNum        || j.recnum || null,
+    serviceHours:  j.serviceHours  != null ? Number(j.serviceHours) : 0,
   }
 }
 
