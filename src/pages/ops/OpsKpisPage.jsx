@@ -104,6 +104,29 @@ export default function OpsKpisPage() {
   const removeKpi = (idx) =>
     setCustoms(customs.filter((_, i) => i !== idx))
 
+  // Which timeseries card is currently open for editing (null = none)
+  const isAdmin = true  // TODO: wire to useAuth when available
+  const [editIdx, setEditIdx] = useState(null)
+  const [editPeriod, setEditPeriod] = useState('')
+  const [editValue,  setEditValue]  = useState('')
+
+  const addPointToSeries = (idx) => {
+    if (!editPeriod.trim() || !editValue.trim()) return
+    setCustoms(customs.map((c, i) => {
+      if (i !== idx) return c
+      return { ...c, points: [...c.points, { period: editPeriod.trim(), value: editValue.trim() }] }
+    }))
+    setEditPeriod('')
+    setEditValue('')
+  }
+
+  const removePointFromSeries = (kpiIdx, ptIdx) => {
+    setCustoms(customs.map((c, i) => {
+      if (i !== kpiIdx) return c
+      return { ...c, points: c.points.filter((_, j) => j !== ptIdx) }
+    }))
+  }
+
 
   if (_opsLoading) return <div style={{ padding: '40px 20px', color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem', textAlign: 'center' }}>Loading data…</div>
 
@@ -233,9 +256,10 @@ export default function OpsKpisPage() {
           <div className="ops-grid-3">
             {customs.map((c, i) => {
               if (c.kind === 'timeseries') {
-                const labels = c.points.map((p) => p.period)
-                const data   = c.points.map((p) => toNumber(p.value))
-                const last   = c.points[c.points.length - 1]
+                const labels  = c.points.map((p) => p.period)
+                const data    = c.points.map((p) => toNumber(p.value))
+                const last    = c.points[c.points.length - 1]
+                const isEditing = editIdx === i
                 return (
                   <div key={i} className="ops-kpi" style={{ position: 'relative' }}>
                     <div className="ops-kpi-label">{c.name}</div>
@@ -260,6 +284,77 @@ export default function OpsKpisPage() {
                         options={sparkOpts}
                       />
                     </OpsChartBox>
+
+                    {/* Admin controls */}
+                    {isAdmin && (
+                      <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
+                        <button
+                          className="ops-btn ghost"
+                          style={{ fontSize: '0.72rem', padding: '2px 8px' }}
+                          onClick={() => setEditIdx(isEditing ? null : i)}
+                        >{isEditing ? '▲ Close' : '+ Add point'}</button>
+                      </div>
+                    )}
+
+                    {/* Inline add-point form */}
+                    {isEditing && (
+                      <div style={{
+                        marginTop: 10, padding: '10px 10px 8px',
+                        background: 'rgba(111,168,255,0.06)',
+                        border: '1px solid rgba(111,168,255,0.2)',
+                        borderRadius: 6,
+                      }}>
+                        <div className="ops-small" style={{ color: 'var(--blue)', fontWeight: 600, marginBottom: 8 }}>
+                          Add data point
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                          <input
+                            className="ops-input"
+                            value={editPeriod}
+                            onChange={(e) => setEditPeriod(e.target.value)}
+                            placeholder="Period (e.g. May 2026)"
+                            style={{ flex: 1, fontSize: '0.8rem' }}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <input
+                            className="ops-input"
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            placeholder="Value"
+                            style={{ width: 80, fontSize: '0.8rem' }}
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => { if (e.key === 'Enter') addPointToSeries(i) }}
+                          />
+                          <button
+                            className="ops-btn ghost"
+                            style={{ fontSize: '0.78rem', padding: '3px 10px', color: 'var(--pos)', borderColor: 'rgba(72,212,100,0.4)' }}
+                            onClick={() => addPointToSeries(i)}
+                          >Add</button>
+                        </div>
+                        {/* Existing points list with delete */}
+                        <div style={{ maxHeight: 120, overflowY: 'auto' }}>
+                          {c.points.map((pt, j) => (
+                            <div key={j} style={{
+                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                              padding: '2px 0', fontSize: '0.78rem', color: 'rgba(255,255,255,0.7)',
+                              borderBottom: '1px solid rgba(255,255,255,0.06)',
+                            }}>
+                              <span>{pt.period}</span>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ color: 'var(--white)', fontWeight: 600 }}>{pt.value}</span>
+                                <button
+                                  style={{ background: 'none', border: 'none', cursor: 'pointer',
+                                    color: 'rgba(255,255,255,0.3)', fontSize: '0.7rem', padding: '0 2px' }}
+                                  onClick={() => removePointFromSeries(i, j)}
+                                  title="Remove point"
+                                >✕</button>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     <button
                       className="ops-btn ghost"
                       onClick={() => removeKpi(i)}
