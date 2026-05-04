@@ -40,15 +40,16 @@ export function useOpsData() {
   // fires once and the error state is the signal we use to fall back.
   const live = useOpsDataLive()
 
+  // While the live fetch is in flight, return null so pages can show
+  // a loading state instead of flashing mock data.
+  if (USE_LIVE && live.loading) return null
+
   return useMemo(() => {
     if (USE_LIVE && live.data) {
       return live.data
     }
     // Fixture path — unchanged behaviour.
     const pnl = PNL[pc]
-    // Cash basis just clips revenue slightly to fake cash-timing lag —
-    // same as the mockup.  Keeping the shape parallel to Accrual means
-    // chart components don't need to care.
     const adjust = basis === 'Cash' ? 0.94 : 1
     const pnlScaled = {
       ...pnl,
@@ -60,8 +61,6 @@ export function useOpsData() {
       net:      pnl.net.map((v) => Math.round(v * adjust)),
     }
 
-    // Jobs for the selected profit center — used to filter POs/WOs so we
-    // only surface data relevant to what's on screen.
     const jobsForPc = JOBS[pc]
     const jobNums   = new Set(jobsForPc.map((j) => j.num))
 
