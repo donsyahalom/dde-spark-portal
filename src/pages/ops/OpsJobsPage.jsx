@@ -1037,14 +1037,6 @@ export default function OpsJobsPage() {
   // isAdmin — stub: replace with useAuth check when wired
   const isAdmin = true
 
-  // Period productivity — cost-based approximation for the selected window.
-  // Falls back to weighted lifetime productivity when periodProd is null.
-  const { periodProd, loading: prodLoading } = usePeriodProductivity(
-    allContractJobs, dateFrom, dateTo, dateFilterOn,
-  )
-  // activeProd: use period calc when available, else weighted lifetime
-  const activeProd = periodProd ?? contractProd
-
   // ── Data pipeline ────────────────────────────────────────────────────
   // 1. Apply type overrides
   const effectiveJobs = useMemo(() =>
@@ -1057,6 +1049,13 @@ export default function OpsJobsPage() {
   // 2. Split by type
   const allContractJobs = useMemo(() => effectiveJobs.filter((j) => j.type === 'contract'), [effectiveJobs])
   const allServiceJobs  = useMemo(() => effectiveJobs.filter((j) => j.type === 'service'),  [effectiveJobs])
+
+  // Period productivity — cost-based approximation for the selected window.
+  // Falls back to weighted lifetime productivity when periodProd is null.
+  // NOTE: must be called after allContractJobs is defined (hook rules).
+  const { periodProd, loading: prodLoading } = usePeriodProductivity(
+    allContractJobs, dateFrom, dateTo, dateFilterOn,
+  )
 
   // 3. Apply date filter (affects cards too when on)
   const { filtered: contractJobs, totalWithDates: contractDatesAvail, outOfRange: contractOut = 0, totalWithoutDates: contractNoDates = 0 } = useMemo(() =>
@@ -1090,6 +1089,8 @@ export default function OpsJobsPage() {
     () => companyProductivity(allContractJobs, prodFilterFrom, prodFilterTo),
     [allContractJobs, prodFilterFrom, prodFilterTo],
   )
+  // activeProd: use period calc when available, else weighted lifetime
+  const activeProd = periodProd ?? contractProd
   const svcProd      = useMemo(() => serviceProductivity(allServiceJobs, workOrders), [allServiceJobs, workOrders])
 
   // 5. Enrich service rows with WO stats
