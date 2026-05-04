@@ -208,10 +208,15 @@ function buildPnl(rows) {
   // mock's heuristic so the chart's overlay lines render.
   const priorRevenue = revenue.map((r) => Math.round(r * 0.93))
   const goalRevenue  = revenue.map((r) => Math.round(r * 1.05))
+  // Expose last row's acct_period + post_year so the P&L page can
+  // determine precisely whether the most recent month is still in progress.
+  const lastRow = rows[rows.length - 1]
   return {
     labels: months,
     revenue, cogs, burden, gp, overhead, net, gpPct,
     priorRevenue, goalRevenue,
+    lastAcctPeriod: lastRow ? Number(lastRow.acct_period) : null,
+    lastPostYear:   lastRow ? Number(lastRow.post_year)   : null,
   }
 }
 
