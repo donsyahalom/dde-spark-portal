@@ -707,7 +707,6 @@ function ContractJobRow({ job, purchaseOrders, workOrders, expanded, onToggle,
                   </div>
                 )}
                 <AdminControls job={job} currentType={job.type} onReclassify={onReclassify} onClose={onClose} isAdmin={isAdmin} />
-              {isAdmin && <JobGroupPanel job={job} allJobs={allJobs || []} groups={jobGroups || {}} onGroupsChange={onGroupsChange} />}
                 {isAdmin && <JobGroupPanel job={job} allJobs={allJobs || []} groups={jobGroups || {}} onGroupsChange={onGroupsChange} />}
               </div>
               <div className="ops-small ops-text-dim" style={{ textAlign: 'right' }}>
