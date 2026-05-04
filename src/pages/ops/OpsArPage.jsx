@@ -134,7 +134,7 @@ function AgingTable({ title, rows, bucketLabels, retainageByCust, emptyMsg }) {
   if (!rows.length) {
     return (
       <div>
-        <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>{title}</div>
+        {title && <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>{title}</div>}
         <div className="ops-small ops-text-dim">{emptyMsg}</div>
       </div>
     )
@@ -146,7 +146,7 @@ function AgingTable({ title, rows, bucketLabels, retainageByCust, emptyMsg }) {
     : 0
   return (
     <div>
-      <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>{title}</div>
+      {title && <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>{title}</div>}
       <div style={{ overflowX: 'auto' }}>
         <table className="ops-table" style={{ fontSize: '0.82rem' }}>
           <thead>
@@ -200,6 +200,27 @@ export default function OpsArPage() {
   const [agingMode, setAgingMode] = useState('days')
   // Email section is collapsed by default — admins can expand it.
   const [emailOpen, setEmailOpen] = useState(false)
+
+  // Collapse state for each section — all expanded by default
+  const [open, setOpen] = useState({
+    aging: true,
+    agingContract: true,
+    agingService: true,
+    openInvoices: true,
+    openContract: true,
+    openService: true,
+    allInvoices: true,
+  })
+  const toggle = (key) => setOpen((prev) => ({ ...prev, [key]: !prev[key] }))
+
+  // Collapse toggle button — rendered in each card's `right` prop
+  const CollapseBtn = ({ sectionKey }) => (
+    <button
+      className="ops-btn ghost"
+      style={{ padding: '3px 10px', fontSize: '0.78rem' }}
+      onClick={() => toggle(sectionKey)}
+    >{open[sectionKey] ? '▲ Collapse' : '▼ Expand'}</button>
+  )
 
   // Build a map of job# → effective type (respecting user overrides).
   // When a job has been moved (e.g. contract → service), its invoices
@@ -334,47 +355,76 @@ export default function OpsArPage() {
         right={
           <div className="ops-toolbar">
             <div className="ops-toggle" role="group" aria-label="Aging bucket mode">
-              <button
-                type="button"
-                onClick={() => setAgingMode('days')}
-                className={agingMode === 'days' ? 'active' : ''}
-              >Days</button>
-              <button
-                type="button"
-                onClick={() => setAgingMode('months')}
-                className={agingMode === 'months' ? 'active' : ''}
-              >Months</button>
+              <button type="button" onClick={() => setAgingMode('days')} className={agingMode === 'days' ? 'active' : ''}>Days</button>
+              <button type="button" onClick={() => setAgingMode('months')} className={agingMode === 'months' ? 'active' : ''}>Months</button>
             </div>
+            <CollapseBtn sectionKey="aging" />
           </div>
         }
       >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 18 }}>
-          <AgingTable
-            title="Contract (AR) aging by customer"
-            rows={arAging}
-            bucketLabels={bucketLabels}
-            retainageByCust={retainageByCust}
-            emptyMsg="No open contract invoices."
-          />
-          <AgingTable
-            title="Service (SR) aging by customer"
-            rows={srAging}
-            bucketLabels={bucketLabels}
-            /* no retainage column for service — SR jobs don't have retention */
-            emptyMsg="No open service invoices."
-          />
-        </div>
+        {open.aging && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 18 }}>
+            {/* Contract aging sub-section */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: open.agingContract ? 8 : 0 }}>
+                <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600 }}>Contract (AR) aging by customer</div>
+                <CollapseBtn sectionKey="agingContract" />
+              </div>
+              {open.agingContract && (
+                <AgingTable
+                  title=""
+                  rows={arAging}
+                  bucketLabels={bucketLabels}
+                  retainageByCust={retainageByCust}
+                  emptyMsg="No open contract invoices."
+                />
+              )}
+            </div>
+            {/* Service aging sub-section */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: open.agingService ? 8 : 0 }}>
+                <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600 }}>Service (SR) aging by customer</div>
+                <CollapseBtn sectionKey="agingService" />
+              </div>
+              {open.agingService && (
+                <AgingTable
+                  title=""
+                  rows={srAging}
+                  bucketLabels={bucketLabels}
+                  emptyMsg="No open service invoices."
+                />
+              )}
+            </div>
+          </div>
+        )}
       </OpsSectionCard>
 
       {/* ── Open invoices, days-late desc (matches email layout) ──── */}
       <OpsSectionCard
         title="Open invoices — sorted by days late"
         subtitle="Same list that ships in the weekly email. Oldest at the top."
+        right={<CollapseBtn sectionKey="openInvoices" />}
       >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 18 }}>
-          <InvoiceList title="Contract (AR)" rows={arSorted} />
-          <InvoiceList title="Service (SR)"  rows={srSorted} />
-        </div>
+        {open.openInvoices && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 18 }}>
+            {/* Contract sub-section */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: open.openContract ? 8 : 0 }}>
+                <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600 }}>Contract (AR)</div>
+                <CollapseBtn sectionKey="openContract" />
+              </div>
+              {open.openContract && <InvoiceList title="" rows={arSorted} />}
+            </div>
+            {/* Service sub-section */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: open.openService ? 8 : 0 }}>
+                <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600 }}>Service (SR)</div>
+                <CollapseBtn sectionKey="openService" />
+              </div>
+              {open.openService && <InvoiceList title="" rows={srSorted} />}
+            </div>
+          </div>
+        )}
       </OpsSectionCard>
 
       {/* ── Weekly email settings + preview — admin-only, collapsible ── */}
@@ -552,8 +602,9 @@ export default function OpsArPage() {
       {/* ── Legacy full A/R list (kept for reference) ───────────── */}
       <OpsSectionCard
         title="All open invoices — contract + service combined"
-        subtitle="Every open AR and SR invoice in one list. The aging report above groups these by customer; the sorted list above orders them by days late.">
-        <div style={{ overflowX: 'auto' }}>
+        subtitle="Every open AR and SR invoice in one list. The aging report above groups these by customer; the sorted list above orders them by days late."
+        right={<CollapseBtn sectionKey="allInvoices" />}>
+        {open.allInvoices && <div style={{ overflowX: 'auto' }}>
           <table className="ops-table">
             <thead>
               <tr>
@@ -593,7 +644,7 @@ export default function OpsArPage() {
               })}
             </tbody>
           </table>
-        </div>
+        </div>}
       </OpsSectionCard>
 
       <OpsPaymentHistory />
@@ -648,7 +699,7 @@ export default function OpsArPage() {
 function InvoiceList({ title, rows }) {
   return (
     <div>
-      <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>{title}</div>
+      {title && <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>{title}</div>}
       <div style={{ overflowX: 'auto' }}>
         <table className="ops-table" style={{ fontSize: '0.82rem' }}>
           <thead>
