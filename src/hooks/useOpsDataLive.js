@@ -109,6 +109,7 @@ function enrichJob(j) {
     contractDate:  j.contractDate  || null,
     jobNum:        j.jobNum        || j.recnum || null,
     serviceHours:  j.serviceHours  != null ? Number(j.serviceHours) : 0,
+    totalBudget:   j.totalBudget   != null ? Number(j.totalBudget)  : 0,
   }
 }
 
