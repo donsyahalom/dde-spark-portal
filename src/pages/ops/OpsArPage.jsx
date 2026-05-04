@@ -191,7 +191,6 @@ function AgingTable({ title, rows, bucketLabels, retainageByCust, emptyMsg }) {
 
 export default function OpsArPage() {
   const _ops = useOpsData()
-  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
   const { arInvoices, arEmailDefaults, jobs } = _ops
   const { currentUser } = useAuth()
   const { applyJobTypeOverrides } = useOpsViewState()
@@ -699,6 +698,9 @@ export default function OpsArPage() {
 }
 
 function InvoiceList({ title, rows }) {
+  // Show loading state instead of mock data flash
+  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
+
   return (
     <div>
       {title && <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>{title}</div>}

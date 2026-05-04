@@ -919,7 +919,6 @@ function ServiceJobRow({ job, workOrders, expanded, onToggle, fmtCell, columns, 
 
 export default function OpsJobsPage() {
   const _ops = useOpsData()
-  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
   const { jobs, purchaseOrders, workOrders } = _ops
   const { setJobTypeOverride, applyJobTypeOverrides } = useOpsViewState()
 
@@ -1153,6 +1152,9 @@ export default function OpsJobsPage() {
   )
 
   // ── Render ─────────────────────────────────────────────────────────
+  // Show loading state instead of mock data flash
+  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
+
   return (
     <div>
       {/* Date filter — top of page, affects everything */}

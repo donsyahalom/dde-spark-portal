@@ -91,7 +91,6 @@ function fmtCell(val, unit) {
 
 export default function OpsPayrollPage() {
   const _ops = useOpsData()
-  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
   const { payrollLines, jobs } = _ops
   const [mode, setMode] = useState('employee') // 'employee' | 'job'
   const [q, setQ]       = useState('')
@@ -199,6 +198,9 @@ export default function OpsPayrollPage() {
   // Single identity column — employee name or job name (no secondary column)
   const primaryHeader = mode === 'employee' ? 'Employee' : 'Job'
   const COLUMNS       = mode === 'employee' ? COLUMNS_EMP : COLUMNS_JOB
+
+  // Show loading state instead of mock data flash
+  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
 
   return (
     <div>

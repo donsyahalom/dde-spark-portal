@@ -55,7 +55,6 @@ function toNumber(v) {
 
 export default function OpsKpisPage() {
   const _ops = useOpsData()
-  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
   const { kpiSparks } = _ops
 
   // Persisted custom-KPI list.
@@ -108,6 +107,9 @@ export default function OpsKpisPage() {
 
   const removeKpi = (idx) =>
     setCustoms(customs.filter((_, i) => i !== idx))
+
+  // Show loading state instead of mock data flash
+  if (!_ops) return <div style={{ padding: '40px 20px', color: 'var(--white-dim)', fontSize: '0.9rem' }}>Loading…</div>
 
   return (
     <div>
