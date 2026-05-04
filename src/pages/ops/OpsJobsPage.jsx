@@ -1159,9 +1159,7 @@ export default function OpsJobsPage() {
       <div className="ops-grid-3" style={{ marginBottom: 12 }}>
         <OpsSectionCard title="Contract productivity"
           subtitle={dateFilterOn
-            ? (prodLoading ? 'Loading period data…'
-              : periodProd ? `Cost-based period estimate · ${dateFrom} → ${dateTo}`
-              : `Day-weighted earned-value · ${dateFrom} → ${dateTo}`)
+            ? `Day-weighted earned-value · ${dateFrom} → ${dateTo}`
             : "Lifetime earned-value — all contract jobs"}>
           <div className="ops-kpi-value" style={{ color: prodColor(contractProd.productivity) }}>
             {contractProd.productivity == null ? '—' : contractProd.productivity.toFixed(2)}
