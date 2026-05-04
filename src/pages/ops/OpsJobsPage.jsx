@@ -136,7 +136,7 @@ function applyDateFilter(jobs, dateFrom, dateTo) {
     const d = jobDates(j)
     if (!d || !d.start) {
       totalWithoutDates++
-      return false  // no date data → exclude when filter is active
+      return true   // no date data → include (can't prove it's outside range)
     }
     const jobEnd = d.end || '9999-12-31'  // no end = ongoing
     const overlaps = d.start <= dateTo && jobEnd >= dateFrom
@@ -993,7 +993,9 @@ export default function OpsJobsPage() {
   const outOfRangeCount = contractOut + serviceOut
   const noDatesCount    = contractNoDates + serviceNoDates
 
-  // 4. Card metrics (from date-filtered job lists)
+  // 4. Card metrics — use date-filtered lists so cards match the table.
+  //    Jobs with no date data pass through the filter so they still
+  //    contribute to productivity (can't prove they're outside the range).
   const contractProd = useMemo(() => companyProductivity(contractJobs), [contractJobs])
   const svcProd      = useMemo(() => serviceProductivity(serviceJobs, workOrders), [serviceJobs, workOrders])
 
