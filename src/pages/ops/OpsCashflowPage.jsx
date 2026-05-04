@@ -8,11 +8,38 @@ import { moneyLineOpts, PALETTE } from '../../lib/opsChartOpts'
 import { supabase } from '../../lib/supabase'
 import { useState, useEffect } from 'react'
 
-function Row({ label, value, strong, dim }) {
+// Draws a red background band over the future portion of the chart
+// (everything from this week's index onward).
+const futureBandPlugin = {
+  id: 'futureBand',
+  beforeDatasetsDraw(chart, _args, opts) {
+    if (!opts.fromIdx && opts.fromIdx !== 0) return
+    const { ctx, chartArea: { top, bottom }, scales: { x } } = chart
+    const n = chart.data.labels.length
+    if (opts.fromIdx >= n) return
+
+    const xLeft  = x.getPixelForValue(opts.fromIdx)
+    const xRight = x.getPixelForValue(n - 1)
+    const tickW  = n > 1 ? x.getPixelForValue(1) - x.getPixelForValue(0) : 20
+    const left   = xLeft  - tickW / 2
+    const right  = xRight + tickW / 2
+
+    ctx.save()
+    ctx.fillStyle = 'rgba(220, 70, 70, 0.10)'
+    ctx.fillRect(left, top, right - left, bottom - top)
+    ctx.strokeStyle = 'rgba(220, 70, 70, 0.45)'
+    ctx.setLineDash([5, 4])
+    ctx.lineWidth = 1.5
+    ctx.beginPath(); ctx.moveTo(left, top); ctx.lineTo(left, bottom); ctx.stroke()
+    ctx.restore()
+  },
+}
+
+function Row({ label, value, strong }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
       <span className="ops-text-dim ops-small">{label}</span>
-      <span style={{ fontWeight: strong ? 700 : 500, color: dim ? 'var(--gold)' : 'var(--white)' }}>{value}</span>
+      <span style={{ fontWeight: strong ? 700 : 500, color: strong ? 'var(--gold)' : 'var(--white)' }}>{value}</span>
     </div>
   )
 }
@@ -77,15 +104,39 @@ export default function OpsCashflowPage() {
 
   const totalCash = useMemo(() => banks.reduce((s, b) => s + (b.current_balance || 0), 0), [banks])
 
+  // Find the index of the current week in the labels array.
+  // cashflow_weekly view uses 'Mon DD' labels (e.g. 'May 05').
+  // The view orders past→future with current week included,
+  // so future starts at the first label AFTER today's week.
+  const futureFromIdx = useMemo(() => {
+    if (!cashflow.weeks?.length) return null
+    const todayWeekLabel = new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit' })
+      .replace(',', '')
+    // Find the label closest to today — the view's label is the week's Monday
+    // formatted as 'Mon DD'. Walk from start and mark where future begins.
+    // Simpler: the view always has 26 past + current + 13 future = 40 rows.
+    // Current week is at index 26 (0-based). Future starts at index 27.
+    return 27
+  }, [cashflow.weeks])
+
   const chartData = {
     labels: cashflow.weeks,
     datasets: [
-      { label: 'Cash',    data: cashflow.cash,    borderColor: PALETTE.blue,  backgroundColor: 'transparent', tension: 0.3, borderWidth: 2 },
-      { label: 'Inflow',  data: cashflow.inflow,  borderColor: PALETTE.green, backgroundColor: 'transparent', tension: 0.3, borderWidth: 2 },
-      { label: 'Outflow', data: cashflow.outflow, borderColor: PALETTE.red,   backgroundColor: 'transparent', tension: 0.3, borderWidth: 2 },
+      { label: 'Cash',    data: cashflow.cash,    borderColor: PALETTE.blue,  backgroundColor: 'transparent', tension: 0.3, borderWidth: 2.5 },
+      { label: 'Inflow',  data: cashflow.inflow,  borderColor: PALETTE.green, backgroundColor: 'transparent', tension: 0.3, borderWidth: 1.5 },
+      { label: 'Outflow', data: cashflow.outflow, borderColor: PALETTE.red,   backgroundColor: 'transparent', tension: 0.3, borderWidth: 1.5 },
     ],
   }
-  const opts = moneyLineOpts()
+
+  const chartOpts = useMemo(() => ({
+    ...moneyLineOpts(),
+    plugins: {
+      ...moneyLineOpts().plugins,
+      futureBand: { fromIdx: futureFromIdx },
+      legend: { display: true, position: 'top', align: 'end',
+        labels: { color: 'rgba(255,255,255,0.85)', font: { size: 11 } } },
+    },
+  }), [futureFromIdx])
 
   if (_opsLoading) return <div style={{ padding: '40px 20px', color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem', textAlign: 'center' }}>Loading data…</div>
 
@@ -116,9 +167,19 @@ export default function OpsCashflowPage() {
 
       {/* Cashflow chart */}
       {cashflow.weeks?.length > 0 && (
-        <OpsSectionCard title="Weekly cash position" subtitle="Running bank balance based on actual GL transactions, AR receipts, and AP payments.">
+        <OpsSectionCard
+          title="Weekly cash position"
+          subtitle="Historical data left of red line · forecast (projected) right of red line. Based on GL transactions, AR receipts, and AP payments."
+          right={
+            <span style={{ fontSize: '0.78rem', padding: '3px 12px', borderRadius: 6,
+              background: 'rgba(220,70,70,0.12)', border: '1px solid rgba(220,70,70,0.4)',
+              color: 'rgba(255,140,140,0.9)' }}>
+              ⚠ Future — projected
+            </span>
+          }
+        >
           <OpsChartBox size="lg">
-            <Line data={chartData} options={opts} />
+            <Line data={chartData} options={chartOpts} plugins={[futureBandPlugin]} />
           </OpsChartBox>
         </OpsSectionCard>
       )}
