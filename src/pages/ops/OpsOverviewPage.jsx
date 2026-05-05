@@ -1,88 +1,113 @@
+import { useMemo } from 'react'
 import { Line } from 'react-chartjs-2'
 import OpsKpiCard from '../../components/ops/OpsKpiCard'
 import OpsChartBox from '../../components/ops/OpsChartBox'
 import OpsSectionCard from '../../components/ops/OpsSectionCard'
 import { useOpsData, companyProductivity } from '../../hooks/useOpsData'
+import { useOpsViewState } from '../../context/OpsViewStateContext'
 import { moneyLineOpts, PALETTE } from '../../lib/opsChartOpts'
 import { fmtK } from '../../lib/opsFormat'
 
-// Retainage due in the next 30 days — heuristic mock estimate.
-//   pctCmp = 100 (Closed)     → full retainageHeld is due (final release)
-//   pctCmp ≥ 95  (substantial)→ 50% of retainageHeld is due
-//   pctCmp < 95               → none
-// When Supabase is wired we'll read actual release dates off the job's
-// release schedule + the job's closeout target date.
-function retainageDueNext30d(jobs) {
-  return jobs
-    .filter((j) => j.type === 'contract')
-    .reduce((sum, j) => {
-      if (j.pctCmp >= 100 || j.status === 'Closed') return sum + (j.retainageHeld || 0)
-      if (j.pctCmp >= 95) return sum + Math.round((j.retainageHeld || 0) * 0.5)
-      return sum
-    }, 0)
-}
-
-function totalRetainageHeld(jobs) {
-  return jobs
-    .filter((j) => j.type === 'contract')
-    .reduce((sum, j) => sum + (j.retainageHeld || 0), 0)
-}
-
-// Compact money formatter — drops decimals, adds thousands separators
-// and a leading $.  Handles null/undefined as an em-dash.
 const fmt$ = (n) =>
   n == null ? '—' : `$${Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
 
+const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
 export default function OpsOverviewPage() {
-  const { kpis, pnl, jobs, loading: _opsLoading } = useOpsData()
+  const { kpis, pnl, jobs, arInvoices, loading: _opsLoading } = useOpsData()
+  const { period } = useOpsViewState()
 
-  // 2nd row of Overview cards
-  const prod       = companyProductivity(jobs)
-  const heldTotal  = totalRetainageHeld(jobs)
-  const dueSoon    = retainageDueNext30d(jobs)
+  // ── Period-filtered pnl (same logic as OpsPnlPage) ─────────────────
+  const filteredPnl = useMemo(() => {
+    if (!pnl.labels.length) return pnl
+    const now = new Date()
+    const curMonth = now.getMonth() + 1
+    const curQ = Math.ceil(curMonth / 3)
 
-  const data = {
-    labels: pnl.labels,
-    datasets: [
-      {
-        label: 'Revenue', data: pnl.revenue,
-        borderColor: PALETTE.blue, backgroundColor: 'rgba(111,168,255,0.10)',
-        fill: true, tension: 0.3, borderWidth: 2,
-      },
-      {
-        label: 'Direct Cost', data: pnl.cogs,
-        borderColor: PALETTE.red, backgroundColor: 'transparent',
-        tension: 0.3, borderWidth: 2,
-      },
-      {
-        label: 'GP', data: pnl.gp,
-        borderColor: PALETTE.green, backgroundColor: 'transparent',
-        tension: 0.3, borderWidth: 2,
-      },
-      {
-        label: 'Revenue (PY)', data: pnl.priorRevenue || [],
-        borderColor: 'rgba(255,255,255,0.35)', borderDash: [4, 4],
-        backgroundColor: 'transparent', tension: 0.3, borderWidth: 1.5,
-      },
-    ],
-  }
+    let keepIndices = pnl.labels.map((_, i) => i)
 
-  const opts = moneyLineOpts({
-    plugins: {
-      tooltip: {
-        callbacks: {
-          label: (ctx) => `${ctx.dataset.label}: ${fmtK(ctx.parsed.y)}`,
-        },
-      },
-    },
-  })
+    if (period === 'mtd') {
+      keepIndices = [pnl.labels.length - 1]
+    } else if (period === 'qtd') {
+      const qStart = (curQ - 1) * 3 + 1
+      keepIndices = pnl.labels.reduce((acc, label, i) => {
+        const mIdx = MONTH_ABBR.findIndex((m) => label.startsWith(m))
+        const mNum = mIdx >= 0 ? mIdx + 1 : null
+        if (mNum && mNum >= qStart && mNum <= curMonth) acc.push(i)
+        return acc
+      }, [])
+      if (!keepIndices.length) keepIndices = pnl.labels.map((_, i) => i).slice(-3)
+    }
 
-  // Productivity colour: green if ≥ 1.00, amber 0.90–0.99, red < 0.90
+    const slice = (arr) => keepIndices.map((i) => (arr || [])[i] ?? 0)
+    return {
+      ...pnl,
+      labels:       keepIndices.map((i) => pnl.labels[i]),
+      revenue:      slice(pnl.revenue),
+      cogs:         slice(pnl.cogs),
+      gp:           slice(pnl.gp),
+      priorRevenue: slice(pnl.priorRevenue || []),
+    }
+  }, [pnl, period])
+
+  // ── Retainage from live arInvoices (isRetainage flag) ──────────────
+  // These are invoices where balance = retainage holdback — the true
+  // outstanding retainage we expect to collect at project closeout.
+  const retainageInvoices = useMemo(
+    () => (arInvoices || []).filter((i) => i.isRetainage),
+    [arInvoices],
+  )
+  const heldTotal = useMemo(
+    () => retainageInvoices.reduce((s, i) => s + (i.balance || 0), 0),
+    [retainageInvoices],
+  )
+  // "Due soon" — retainage on jobs at 95%+ complete or Closed status
+  const dueSoon = useMemo(() => {
+    const retainageJobNums = new Set(retainageInvoices.map((i) => i.job))
+    return (jobs || [])
+      .filter((j) => j.type === 'contract')
+      .filter((j) => {
+        // Match job to its retainage invoices via job field
+        const hasRetainage = retainageInvoices.some((i) => i.job?.includes(j.num) || j.name === i.customer)
+        return hasRetainage && (j.pctCmp >= 95 || j.status === 'Closed' || j.status === 'Complete')
+      })
+      .reduce((sum, j) => {
+        const jobRetainage = retainageInvoices
+          .filter((i) => i.job?.includes(j.num) || j.name === i.customer)
+          .reduce((s, i) => s + (i.balance || 0), 0)
+        return sum + jobRetainage
+      }, 0)
+  }, [retainageInvoices, jobs])
+
+  // ── Productivity ────────────────────────────────────────────────────
+  const prod = useMemo(() => companyProductivity(jobs || []), [jobs])
+
   const prodColor =
     prod.productivity == null ? 'var(--white)'
     : prod.productivity >= 1.0 ? 'var(--pos)'
     : prod.productivity >= 0.9 ? 'var(--gold)'
     : 'var(--neg)'
+
+  // ── Chart ───────────────────────────────────────────────────────────
+  const data = {
+    labels: filteredPnl.labels,
+    datasets: [
+      { label: 'Revenue',     data: filteredPnl.revenue, borderColor: PALETTE.blue,
+        backgroundColor: 'rgba(111,168,255,0.10)', fill: true, tension: 0.3, borderWidth: 2 },
+      { label: 'Direct Cost', data: filteredPnl.cogs,    borderColor: PALETTE.red,
+        backgroundColor: 'transparent', tension: 0.3, borderWidth: 2 },
+      { label: 'GP',          data: filteredPnl.gp,      borderColor: PALETTE.green,
+        backgroundColor: 'transparent', tension: 0.3, borderWidth: 2 },
+      { label: 'Revenue (PY)', data: filteredPnl.priorRevenue,
+        borderColor: 'rgba(255,255,255,0.35)', borderDash: [4, 4],
+        backgroundColor: 'transparent', tension: 0.3, borderWidth: 1.5 },
+    ],
+  }
+  const opts = moneyLineOpts({
+    plugins: { tooltip: { callbacks: {
+      label: (ctx) => `${ctx.dataset.label}: ${fmtK(ctx.parsed.y)}`,
+    }}},
+  })
 
   if (_opsLoading) return <div style={{ padding: '40px 20px', color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem', textAlign: 'center' }}>Loading data…</div>
 
@@ -92,9 +117,9 @@ export default function OpsOverviewPage() {
         {kpis.map((k) => <OpsKpiCard key={k.id} kpi={k} />)}
       </div>
 
-      {/* 2nd row — operating health snapshot */}
+      {/* Operating health snapshot */}
       <div className="ops-grid-4">
-        <OpsSectionCard title="Company productivity" subtitle="Earned hrs ÷ actual hrs, contract jobs only">
+        <OpsSectionCard title="Company productivity" subtitle="Earned hrs ÷ actual hrs · contract jobs">
           <div style={{ fontSize: '1.25rem', fontWeight: 700, color: prodColor }}>
             {prod.productivity == null ? '—' : prod.productivity.toFixed(2)}
           </div>
@@ -104,56 +129,43 @@ export default function OpsOverviewPage() {
         </OpsSectionCard>
 
         <OpsSectionCard title="Revenue per field hour" subtitle="Contract revenue ÷ actual labor hrs">
-          <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--white)' }}>
+          <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>
             {prod.revenuePerHour == null ? '—' : `$${prod.revenuePerHour.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
           </div>
+          <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>Blended across all contract work</div>
+        </OpsSectionCard>
+
+        <OpsSectionCard
+          title="Retainage held"
+          subtitle={`${retainageInvoices.length} open retainage invoices`}
+        >
+          <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>{fmt$(heldTotal)}</div>
           <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>
-            Blended across all contract work
+            Outstanding retainage from billed invoices
           </div>
         </OpsSectionCard>
 
-        <OpsSectionCard title="Retainage held" subtitle="Total contract retention outstanding">
-          <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--white)' }}>
-            {fmt$(heldTotal)}
-          </div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>
-            Across {jobs.filter((j) => j.type === 'contract' && (j.retainageHeld || 0) > 0).length} contract jobs
-          </div>
-        </OpsSectionCard>
-
-        <OpsSectionCard title="Retainage due — next 30 days" subtitle="Releases scheduled at 95% / 100% cmp">
+        <OpsSectionCard
+          title="Retainage — near release"
+          subtitle="Jobs ≥ 95% complete or closed"
+        >
           <div style={{ fontSize: '1.25rem', fontWeight: 700, color: dueSoon > 0 ? 'var(--gold)' : 'var(--white)' }}>
-            {fmt$(dueSoon)}
+            {fmt$(dueSoon || 0)}
           </div>
           <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>
-            Based on current % complete
+            Based on % complete on active jobs
           </div>
         </OpsSectionCard>
       </div>
 
       <OpsSectionCard
-        title="Revenue, Direct Cost, GP — monthly"
+        title={`Revenue, Direct Cost, GP — ${period === 'mtd' ? 'MTD' : period === 'qtd' ? 'QTD' : 'YTD'}`}
         subtitle="Dashed line shows prior-year revenue for the same months."
       >
         <OpsChartBox size="lg">
           <Line data={data} options={opts} />
         </OpsChartBox>
       </OpsSectionCard>
-
-      <div className="ops-grid-3">
-        <OpsSectionCard title="Top job this month">
-          <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--white)' }}>Hartford Municipal (2544)</div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>+$312K revenue, GP 18%</div>
-        </OpsSectionCard>
-        <OpsSectionCard title="Cash vs burn">
-          <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--white)' }}>22 weeks runway</div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>At current avg weekly outflow.</div>
-        </OpsSectionCard>
-        <OpsSectionCard title="Oldest A/R">
-          <div style={{ fontSize: '0.95rem', fontWeight: 700 }} className="ops-text-neg">INV-9766 — 113 d</div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>Sage Park Apts C · $21,400 balance</div>
-        </OpsSectionCard>
-      </div>
     </div>
   )
 }
