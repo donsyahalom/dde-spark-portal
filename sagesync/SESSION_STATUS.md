@@ -228,3 +228,124 @@ When you're back at `C:\SageSync`:
 - `IMPLEMENTATION_GUIDE.md` — linear runbook
 - `Sage_Sync_Deployment_Runbook.docx` — same content, polished
 - `SESSION_STATUS.md` — this file
+
+- ---
+
+## Session: May 2026 — Executive Dashboard UAT Development
+
+_Last updated: 2026-05-05_
+
+Major UI and data pipeline work across all ops dashboard tabs. All changes
+are on the `uat` branch and ready for promotion to `main`.
+
+---
+
+### Data architecture discoveries
+
+- **`ar_invoices` status=5** = Void/Written-off. Sage does NOT zero `invoice_balance`
+  on void — status filter already in `ops.ar_invoices` (`NOT IN (4,5)`) is essential.
+  Without it, open AR is overstated by ~$18.9M.
+
+- **Retainage identification**: invoices where `invoice_balance ≈ retainage` (within $1)
+  are retainage holdbacks — fully paid except the contractual retention. Added
+  `isRetainage` boolean flag (appended as last column) to `ops.ar_invoices`.
+  Status-1 invoices with `balance = retainage` confirmed as legitimate holdbacks,
+  NOT unpaid invoices.
+
+- **`timecard_lines` pay_type mapping** (confirmed from data comparison vs `payroll_records`):
+  - `pay_type 1` = Regular
+  - `pay_type 2` = OT (job-coded 99.7% of the time)
+  - `pay_type 4` = Sick (NOTE: was incorrectly documented as vacation)
+  - `pay_type 5` = Vacation (NOTE: was incorrectly documented as sick)
+  - `pay_type 6` = Holiday
+  - `pay_type 4/5/6` rows have `NULL job_recnum` — not job-coded in Sage
+
+- **`job_cost_transactions` vs `timecard_lines` join key**: these are parallel Sage
+  subsystems with no shared row-level key. However, `jct.hours = tl.hours_worked`
+  on the same `(job_recnum, trans_date)` is a reliable join key for pay_type
+  classification — confirmed: bookkeeper enters OT as a separate hours entry
+  (e.g. 0.25 OT hrs separate from 8.75 reg hrs).
+
+- **`sage.gl_transactions`**: `check_amount` is outgoing cash only (source_code=1).
+  Incoming AR receipts are NOT stored in the synced data — `artrns` table not yet
+  synced. Days-to-pay calculation is therefore not possible from current data.
+
+- **PostgREST row limit**: Supabase default is 1000 rows. `payroll_lines` has 14,278+
+  rows. Production Supabase max rows must be set to 50000 in Project Settings → API.
+
+---
+
+### `ops_views.sql` changes
+
+**`ops.ar_invoices`**
+- Added `UNION ALL` leg for `sage.service_invoices` (SR type) — service invoices
+  were previously invisible on the A/R tab
+- Added `isRetainage` boolean flag as last column (both UNION legs)
+- `isRetainage = true` when `ABS(invoice_balance - retainage) < 1.00`
+
+**`ops.payroll_lines`** — rewritten:
+- Source: `sage.job_cost_transactions` (has `employee_recnum` + cost)
+- Pay-type classification via LEFT JOIN `sage.timecard_lines` on
+  `(job_recnum, trans_date, hours_worked = jct.hours)` — hours-match is the
+  reliable row-level join key
+- `regHrs` = `pay_type=1` hours, `otHrs` = `pay_type=2` hours
+- Sick/vac/hol always 0 in by-job view (those pay_types have NULL job_recnum)
+
+**`ops.payroll_non_job_time`** — rewritten:
+- Reads `sick_hours`, `vacation_hours`, `holiday_hours` directly from
+  `sage.payroll_records` per employee
+- Previous version used correlated subqueries summing across ALL employees
+
+**`ops.bank_balances`** — new view:
+- `sage.gl_accounts` filtered to `account_type=1` and `is_active=true`
+
+**`ops.cashflow_weekly`** — rewritten:
+- 39-week window (26 past + current + 13 future)
+- Inflows: AR amount_paid + service_payments; Outflows: GL checks + AP amount_paid
+
+**`ops.ar_payment_history`** — updated in Supabase directly:
+- Retainage-only invoices and status=5 excluded from paid totals and deltas
+- Payment history section removed from A/R page (artrns not synced)
+
+---
+
+### JS/React changes
+
+**`useOpsDataLive.js`** — `buildPnl()` exposes `monthDates`; payroll fetch limits 50k/10k
+
+**`useOpsData.js`** — returns `loading` flag; pages show "Loading data…" instead of mock flash
+
+**`OpsViewStateContext.jsx`** — default period changed from `ytd` to `ttm`
+
+**`OpsLayout.jsx`** — Combined/DCM/Silk City buttons greyed out
+
+**`OpsArPage.jsx`** — service invoices visible; retainage toggle (default OFF); collapsible sections; archive per row; payment history section removed
+
+**`OpsApPage.jsx`** — minimum balance threshold ($100 default)
+
+**`OpsCashflowPage.jsx`** — live bank cards; future red band; real AR/AP buckets
+
+**`OpsOverviewPage.jsx`** — period-sensitive revenue/GP/cost cards; retainage from `isRetainage` flag
+
+**`OpsPayrollPage.jsx`** — YTD date filter; COLUMNS_EMP vs COLUMNS_JOB; sticky headers/dual scrollbar; per diem removed
+
+**`OpsPnlPage.jsx` + `OpsOverviewPage.jsx`** — shared `pnlKeepIndices()` handles all 8 period options using `monthDates` for accurate year/quarter filtering
+
+**`OpsKpisPage.jsx`** — built-in cards removed; inline add/remove data points on time-series cards
+
+---
+
+### RLS policy required on production
+
+```sql
+CREATE POLICY up_anon_all ON public.user_permissions
+  FOR ALL TO anon USING (true) WITH CHECK (true);
+```
+
+---
+
+### Known limitations / future work
+
+- **Days-to-pay** — needs `artrns` synced from Sage. Add `q_ar_cash_receipts` to `sage_queries.py` when ready.
+- **Retainage near release** — job matching is heuristic string match; improve when `artrns` available.
+- **Productivity period filtering** — `ops.jobs` has no date dimension; cards show lifetime figures.
