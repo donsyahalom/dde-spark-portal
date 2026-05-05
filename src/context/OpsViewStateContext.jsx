@@ -36,7 +36,7 @@ function saveOverrides(o) {
 export function OpsViewStateProvider({ children }) {
   const [pc, setPc]           = useState('DDE')
   const [basis, setBasis]     = useState('Accrual')
-  const [period, setPeriod]   = useState('ytd')
+  const [period, setPeriod]   = useState('ttm')
   const [compare, setCompare] = useState('none')
 
   // { [jobNum]: 'contract' | 'service' } — persisted to localStorage
