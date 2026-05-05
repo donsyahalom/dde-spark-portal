@@ -200,6 +200,7 @@ export default function OpsArPage() {
   const [agingMode, setAgingMode] = useState('days')
   // Email section is collapsed by default — admins can expand it.
   const [emailOpen, setEmailOpen] = useState(false)
+  const [showRetainage, setShowRetainage] = useState(false)  // exclude retainage by default
 
   // Collapse state for each section — all expanded by default
   const [open, setOpen] = useState({
@@ -246,8 +247,10 @@ export default function OpsArPage() {
   )
 
   // Split invoices AR vs SR.
-  const arInv = useMemo(() => routedInvoices.filter((i) => i.type === 'AR'), [routedInvoices])
-  const srInv = useMemo(() => routedInvoices.filter((i) => i.type === 'SR'), [routedInvoices])
+  const arInv = useMemo(() => routedInvoices.filter((i) => i.type === 'AR' && (showRetainage || !i.isRetainage)), [routedInvoices, showRetainage])
+  const srInv = useMemo(() => routedInvoices.filter((i) => i.type === 'SR' && (showRetainage || !i.isRetainage)), [routedInvoices, showRetainage])
+  const retainageCount = useMemo(() => routedInvoices.filter((i) => i.isRetainage).length, [routedInvoices])
+  const retainageTotal = useMemo(() => routedInvoices.filter((i) => i.isRetainage).reduce((s, i) => s + (i.balance || 0), 0), [routedInvoices])
 
   // Rebuild aging rollups whenever the toggle flips.
   const arAging = useMemo(
