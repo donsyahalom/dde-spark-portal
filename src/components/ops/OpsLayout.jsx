@@ -17,10 +17,10 @@ const SUBNAV = [
 ]
 
 const PCS = [
-  { id: 'COMBINED', label: 'Combined' },
-  { id: 'DDE',      label: 'DuBaldo Electric' },
-  { id: 'DCM',      label: 'DCM (Prop Mgmt)' },
-  { id: 'SILK',     label: 'Silk City' },
+  { id: 'COMBINED', label: 'Combined',         inactive: true },
+  { id: 'DDE',      label: 'DuBaldo Electric', inactive: false },
+  { id: 'DCM',      label: 'DCM (Prop Mgmt)',  inactive: true },
+  { id: 'SILK',     label: 'Silk City',        inactive: true },
 ]
 
 const PAGE_TITLE = {
@@ -100,8 +100,14 @@ function OpsSubnav() {
         {PCS.map((p) => (
           <button
             key={p.id}
-            onClick={() => setPc(p.id)}
+            onClick={() => !p.inactive && setPc(p.id)}
             className={pc === p.id ? 'active' : ''}
+            title={p.inactive ? 'Not active' : undefined}
+            style={p.inactive ? {
+              opacity: 0.35,
+              cursor: 'not-allowed',
+              pointerEvents: 'none',
+            } : undefined}
           >{p.label}</button>
         ))}
       </div>
