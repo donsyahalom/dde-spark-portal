@@ -189,7 +189,7 @@ export default function OpsOverviewPage() {
         <OpsSectionCard title="Direct cost" subtitle={PERIOD_LABELS[period] || 'Period'}>
           <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>{fmt$(periodCogs)}</div>
         </OpsSectionCard>
-        <OpsSectionCard title="Company productivity" subtitle="Earned ÷ actual hrs · contract jobs">
+        <OpsSectionCard title="Company productivity" subtitle="Lifetime · earned ÷ actual hrs · contract jobs">
           <div style={{ fontSize: '1.25rem', fontWeight: 700, color: prodColor }}>
             {prod.productivity == null ? '—' : prod.productivity.toFixed(2)}
           </div>
@@ -199,9 +199,9 @@ export default function OpsOverviewPage() {
         </OpsSectionCard>
       </div>
 
-      {/* Static cards — point-in-time, not period-filtered */}
+      {/* Static cards — point-in-time / lifetime, not period-filtered */}
       <div className="ops-grid-3" style={{ marginBottom: 16 }}>
-        <OpsSectionCard title="Revenue per field hour" subtitle="Contract revenue ÷ actual labor hrs">
+        <OpsSectionCard title="Revenue per field hour" subtitle="Lifetime · contract revenue ÷ actual labor hrs">
           <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>
             {prod.revenuePerHour == null ? '—' : `$${prod.revenuePerHour.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
           </div>
