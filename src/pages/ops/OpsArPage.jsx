@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import OpsSectionCard from '../../components/ops/OpsSectionCard'
-import OpsPaymentHistory from '../../components/ops/OpsPaymentHistory'
+
 import { useOpsData } from '../../hooks/useOpsData'
 import { useAuth } from '../../context/AuthContext'
 import { useOpsViewState } from '../../context/OpsViewStateContext'
@@ -644,8 +644,6 @@ export default function OpsArPage() {
           )}
         </OpsSectionCard>
       )}
-
-      <OpsPaymentHistory />
 
       {/* ── Email preview modal ─────────────────────────────────── */}
       {showPreview && (
