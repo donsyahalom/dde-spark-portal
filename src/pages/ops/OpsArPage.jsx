@@ -356,6 +356,20 @@ export default function OpsArPage() {
         subtitle={`Contract (AR) and Service (SR) aging by customer — ${arInv.length} contract, ${srInv.length} service open invoices. Hover any cell for detail.`}
         right={
           <div className="ops-toolbar">
+            <label className="ops-checkbox" style={{ gap: 6, cursor: 'pointer', userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={showRetainage}
+                onChange={(e) => setShowRetainage(e.target.checked)}
+                style={{ accentColor: 'var(--gold)' }}
+              />
+              <span className="ops-small">
+                Include retainage
+                {retainageCount > 0 && (
+                  <span className="ops-text-dim"> ({retainageCount} · ${Math.round(retainageTotal).toLocaleString()})</span>
+                )}
+              </span>
+            </label>
             <div className="ops-toggle" role="group" aria-label="Aging bucket mode">
               <button type="button" onClick={() => setAgingMode('days')} className={agingMode === 'days' ? 'active' : ''}>Days</button>
               <button type="button" onClick={() => setAgingMode('months')} className={agingMode === 'months' ? 'active' : ''}>Months</button>
