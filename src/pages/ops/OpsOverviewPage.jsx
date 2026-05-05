@@ -133,6 +133,12 @@ export default function OpsOverviewPage() {
       }, 0)
   }, [retainageInvoices, jobs])
 
+  // ── Period totals from filteredPnl ──────────────────────────────────
+  const periodRevenue = useMemo(() => filteredPnl.revenue.reduce((s, v) => s + v, 0), [filteredPnl])
+  const periodGp      = useMemo(() => filteredPnl.gp.reduce((s, v) => s + v, 0), [filteredPnl])
+  const periodCogs    = useMemo(() => filteredPnl.cogs.reduce((s, v) => s + v, 0), [filteredPnl])
+  const periodGpPct   = periodRevenue > 0 ? (periodGp / periodRevenue * 100).toFixed(1) : null
+
   // ── Productivity ────────────────────────────────────────────────────
   const prod = useMemo(() => companyProductivity(jobs || []), [jobs])
 
@@ -171,44 +177,44 @@ export default function OpsOverviewPage() {
         {kpis.map((k) => <OpsKpiCard key={k.id} kpi={k} />)}
       </div>
 
-      {/* Operating health snapshot */}
-      <div className="ops-grid-4">
-        <OpsSectionCard title="Company productivity" subtitle="Earned hrs ÷ actual hrs · contract jobs">
+      {/* Period summary cards — update with MTD/QTD/YTD/TTM selector */}
+      <div className="ops-grid-4" style={{ marginBottom: 16 }}>
+        <OpsSectionCard title="Revenue" subtitle={PERIOD_LABELS[period] || 'Period'}>
+          <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>{fmt$(periodRevenue)}</div>
+        </OpsSectionCard>
+        <OpsSectionCard title="Gross profit" subtitle={PERIOD_LABELS[period] || 'Period'}>
+          <div style={{ fontSize: '1.25rem', fontWeight: 700, color: periodGp >= 0 ? 'var(--pos)' : 'var(--neg)' }}>{fmt$(periodGp)}</div>
+          <div className="ops-small ops-text-dim">{periodGpPct != null ? `${periodGpPct}% GP margin` : ''}</div>
+        </OpsSectionCard>
+        <OpsSectionCard title="Direct cost" subtitle={PERIOD_LABELS[period] || 'Period'}>
+          <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>{fmt$(periodCogs)}</div>
+        </OpsSectionCard>
+        <OpsSectionCard title="Company productivity" subtitle="Earned ÷ actual hrs · contract jobs">
           <div style={{ fontSize: '1.25rem', fontWeight: 700, color: prodColor }}>
             {prod.productivity == null ? '—' : prod.productivity.toFixed(2)}
           </div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>
-            {prod.earnedHrs.toLocaleString()} earned / {prod.actualHrs.toLocaleString()} actual · {prod.jobCount} jobs
+          <div className="ops-small ops-text-dim">
+            {prod.earnedHrs.toLocaleString()} earned / {prod.actualHrs.toLocaleString()} actual
           </div>
         </OpsSectionCard>
+      </div>
 
+      {/* Static cards — point-in-time, not period-filtered */}
+      <div className="ops-grid-3" style={{ marginBottom: 16 }}>
         <OpsSectionCard title="Revenue per field hour" subtitle="Contract revenue ÷ actual labor hrs">
           <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>
             {prod.revenuePerHour == null ? '—' : `$${prod.revenuePerHour.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
           </div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>Blended across all contract work</div>
         </OpsSectionCard>
-
-        <OpsSectionCard
-          title="Retainage held"
-          subtitle={`${retainageInvoices.length} open retainage invoices`}
-        >
+        <OpsSectionCard title="Retainage held" subtitle={`${retainageInvoices.length} open retainage invoices`}>
           <div style={{ fontSize: '1.25rem', fontWeight: 700 }}>{fmt$(heldTotal)}</div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>
-            Outstanding retainage from billed invoices
-          </div>
+          <div className="ops-small ops-text-dim">Outstanding holdbacks from billed invoices</div>
         </OpsSectionCard>
-
-        <OpsSectionCard
-          title="Retainage — near release"
-          subtitle="Jobs ≥ 95% complete or closed"
-        >
+        <OpsSectionCard title="Retainage — near release" subtitle="Jobs ≥ 95% complete or closed">
           <div style={{ fontSize: '1.25rem', fontWeight: 700, color: dueSoon > 0 ? 'var(--gold)' : 'var(--white)' }}>
             {fmt$(dueSoon || 0)}
           </div>
-          <div className="ops-small ops-text-dim" style={{ marginTop: 2 }}>
-            Based on % complete on active jobs
-          </div>
+          <div className="ops-small ops-text-dim">Based on % complete on active jobs</div>
         </OpsSectionCard>
       </div>
 
