@@ -13,40 +13,94 @@ const fmt$ = (n) =>
 
 const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 
+// Shared period filter — returns indices from pnl.monthDates to keep.
+function pnlKeepIndices(monthDates, labels, period) {
+  const now      = new Date()
+  const curYear  = now.getFullYear()
+  const curMonth = now.getMonth() + 1
+  const curQ     = Math.ceil(curMonth / 3)
+  const qStart   = (curQ - 1) * 3 + 1
+  const n        = labels.length
+
+  const byDate = (fn) =>
+    (monthDates || []).reduce((acc, d, i) => {
+      if (!d) { acc.push(i); return acc }
+      if (fn(new Date(d))) acc.push(i)
+      return acc
+    }, [])
+
+  const fallback = (arr) => arr.length ? arr : labels.map((_, i) => i)
+
+  switch (period) {
+    case 'mtd':
+      return fallback(byDate((d) =>
+        d.getFullYear() === curYear && d.getMonth() + 1 === curMonth))
+
+    case 'qtd':
+      return fallback(byDate((d) => {
+        const m = d.getMonth() + 1
+        return d.getFullYear() === curYear && m >= qStart && m <= curMonth
+      }))
+
+    case 'ytd':
+      return fallback(byDate((d) => d.getFullYear() === curYear))
+
+    case 'ttm': {
+      const cutoff = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+      return fallback(byDate((d) => d >= cutoff))
+    }
+
+    case 'last_month': {
+      const lm = curMonth === 1 ? 12 : curMonth - 1
+      const ly = curMonth === 1 ? curYear - 1 : curYear
+      return fallback(byDate((d) => d.getFullYear() === ly && d.getMonth() + 1 === lm))
+    }
+
+    case 'last_quarter': {
+      const lq      = curQ === 1 ? 4 : curQ - 1
+      const ly      = curQ === 1 ? curYear - 1 : curYear
+      const lqStart = (lq - 1) * 3 + 1
+      const lqEnd   = lq * 3
+      return fallback(byDate((d) => {
+        const m = d.getMonth() + 1
+        return d.getFullYear() === ly && m >= lqStart && m <= lqEnd
+      }))
+    }
+
+    case 'last_year':
+      return fallback(byDate((d) => d.getFullYear() === curYear - 1))
+
+    default:
+      return labels.map((_, i) => i)  // custom / unknown: show all
+  }
+}
+
+const PERIOD_LABELS = {
+  mtd: 'MTD', qtd: 'QTD', ytd: 'YTD',
+  ttm: 'Trailing 12M', last_month: 'Last month',
+  last_quarter: 'Last quarter', last_year: 'Last year',
+  custom: 'Custom',
+}
+
 export default function OpsOverviewPage() {
   const { kpis, pnl, jobs, arInvoices, loading: _opsLoading } = useOpsData()
   const { period } = useOpsViewState()
 
-  // ── Period-filtered pnl (same logic as OpsPnlPage) ─────────────────
+  // ── Period-filtered pnl ─────────────────────────────────────────────
   const filteredPnl = useMemo(() => {
     if (!pnl.labels.length) return pnl
-    const now = new Date()
-    const curMonth = now.getMonth() + 1
-    const curQ = Math.ceil(curMonth / 3)
 
-    let keepIndices = pnl.labels.map((_, i) => i)
-
-    if (period === 'mtd') {
-      keepIndices = [pnl.labels.length - 1]
-    } else if (period === 'qtd') {
-      const qStart = (curQ - 1) * 3 + 1
-      keepIndices = pnl.labels.reduce((acc, label, i) => {
-        const mIdx = MONTH_ABBR.findIndex((m) => label.startsWith(m))
-        const mNum = mIdx >= 0 ? mIdx + 1 : null
-        if (mNum && mNum >= qStart && mNum <= curMonth) acc.push(i)
-        return acc
-      }, [])
-      if (!keepIndices.length) keepIndices = pnl.labels.map((_, i) => i).slice(-3)
-    }
-
+    const keepIndices = pnlKeepIndices(pnl.monthDates, pnl.labels, period)
     const slice = (arr) => keepIndices.map((i) => (arr || [])[i] ?? 0)
     return {
       ...pnl,
       labels:       keepIndices.map((i) => pnl.labels[i]),
       revenue:      slice(pnl.revenue),
       cogs:         slice(pnl.cogs),
+      burden:       slice(pnl.burden),
       gp:           slice(pnl.gp),
       priorRevenue: slice(pnl.priorRevenue || []),
+      goalRevenue:  slice(pnl.goalRevenue  || []),
     }
   }, [pnl, period])
 
@@ -159,7 +213,7 @@ export default function OpsOverviewPage() {
       </div>
 
       <OpsSectionCard
-        title={`Revenue, Direct Cost, GP — ${period === 'mtd' ? 'MTD' : period === 'qtd' ? 'QTD' : 'YTD'}`}
+        title={`Revenue, Direct Cost, GP — ${PERIOD_LABELS[period] || 'All data'}`}
         subtitle="Dashed line shows prior-year revenue for the same months."
       >
         <OpsChartBox size="lg">

@@ -75,58 +75,95 @@ const incompleteBandPlugin = {
   },
 }
 
+// Shared period filter — returns indices from pnl.monthDates to keep.
+function pnlKeepIndices(monthDates, labels, period) {
+  const now      = new Date()
+  const curYear  = now.getFullYear()
+  const curMonth = now.getMonth() + 1
+  const curQ     = Math.ceil(curMonth / 3)
+  const qStart   = (curQ - 1) * 3 + 1
+  const n        = labels.length
+
+  const byDate = (fn) =>
+    (monthDates || []).reduce((acc, d, i) => {
+      if (!d) { acc.push(i); return acc }
+      if (fn(new Date(d))) acc.push(i)
+      return acc
+    }, [])
+
+  const fallback = (arr) => arr.length ? arr : labels.map((_, i) => i)
+
+  switch (period) {
+    case 'mtd':
+      return fallback(byDate((d) =>
+        d.getFullYear() === curYear && d.getMonth() + 1 === curMonth))
+
+    case 'qtd':
+      return fallback(byDate((d) => {
+        const m = d.getMonth() + 1
+        return d.getFullYear() === curYear && m >= qStart && m <= curMonth
+      }))
+
+    case 'ytd':
+      return fallback(byDate((d) => d.getFullYear() === curYear))
+
+    case 'ttm': {
+      const cutoff = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+      return fallback(byDate((d) => d >= cutoff))
+    }
+
+    case 'last_month': {
+      const lm = curMonth === 1 ? 12 : curMonth - 1
+      const ly = curMonth === 1 ? curYear - 1 : curYear
+      return fallback(byDate((d) => d.getFullYear() === ly && d.getMonth() + 1 === lm))
+    }
+
+    case 'last_quarter': {
+      const lq      = curQ === 1 ? 4 : curQ - 1
+      const ly      = curQ === 1 ? curYear - 1 : curYear
+      const lqStart = (lq - 1) * 3 + 1
+      const lqEnd   = lq * 3
+      return fallback(byDate((d) => {
+        const m = d.getMonth() + 1
+        return d.getFullYear() === ly && m >= lqStart && m <= lqEnd
+      }))
+    }
+
+    case 'last_year':
+      return fallback(byDate((d) => d.getFullYear() === curYear - 1))
+
+    default:
+      return labels.map((_, i) => i)  // custom / unknown: show all
+  }
+}
+
+const PERIOD_LABELS = {
+  mtd: 'MTD', qtd: 'QTD', ytd: 'YTD',
+  ttm: 'Trailing 12M', last_month: 'Last month',
+  last_quarter: 'Last quarter', last_year: 'Last year',
+  custom: 'Custom',
+}
+
 export default function OpsPnlPage() {
   const { pnl, loading: _opsLoading } = useOpsData()
   const { period } = useOpsViewState()
 
   // ── Slice pnl arrays based on selected period ─────────────────────
-  // pnl_monthly returns all months for the fiscal year (or available data).
-  // MTD = current month only, QTD = current quarter, YTD = full year so far.
   const filteredPnl = useMemo(() => {
     if (!pnl.labels.length) return pnl
-    const now      = new Date()
-    const curMonth = now.getMonth() + 1   // 1-based
-    const curYear  = now.getFullYear()
-    const curQ     = Math.ceil(curMonth / 3)
 
-    // Determine which indices to keep based on period
-    let keepIndices = pnl.labels.map((_, i) => i)  // default: all (YTD)
-
-    if (period === 'mtd') {
-      // Only the current month — match by lastAcctPeriod if available
-      // else match the last label (always current month)
-      keepIndices = pnl.labels.reduce((acc, _, i) => {
-        // Use acct_period from the raw rows if available via lastAcctPeriod
-        // For now: keep only the last index (current/most recent month)
-        if (i === pnl.labels.length - 1) acc.push(i)
-        return acc
-      }, [])
-    } else if (period === 'qtd') {
-      // Current quarter months: Q1=Jan-Mar, Q2=Apr-Jun, Q3=Jul-Sep, Q4=Oct-Dec
-      const qStartMonth = (curQ - 1) * 3 + 1  // first month of current quarter
-      const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-      keepIndices = pnl.labels.reduce((acc, label, i) => {
-        const mIdx = MONTH_ABBR.findIndex((m) => label.startsWith(m))
-        const mNum = mIdx >= 0 ? mIdx + 1 : null
-        if (mNum && mNum >= qStartMonth && mNum <= curMonth) acc.push(i)
-        return acc
-      }, [])
-      // Fallback: last 3 indices if month matching fails
-      if (!keepIndices.length) keepIndices = pnl.labels.map((_, i) => i).slice(-3)
-    }
-    // ytd: keep all
-
-    const slice = (arr) => keepIndices.map((i) => arr[i] ?? 0)
+    const keepIndices = pnlKeepIndices(pnl.monthDates, pnl.labels, period)
+    const slice = (arr) => keepIndices.map((i) => (arr || [])[i] ?? 0)
     return {
       ...pnl,
-      labels:  keepIndices.map((i) => pnl.labels[i]),
-      revenue: slice(pnl.revenue),
-      cogs:    slice(pnl.cogs),
-      burden:  slice(pnl.burden),
-      gp:      slice(pnl.gp),
-      overhead:slice(pnl.overhead),
-      net:     slice(pnl.net),
-      gpPct:   slice(pnl.gpPct),
+      labels:       keepIndices.map((i) => pnl.labels[i]),
+      revenue:      slice(pnl.revenue),
+      cogs:         slice(pnl.cogs),
+      burden:       slice(pnl.burden),
+      gp:           slice(pnl.gp),
+      overhead:     slice(pnl.overhead),
+      net:          slice(pnl.net),
+      gpPct:        slice(pnl.gpPct),
       priorRevenue: slice(pnl.priorRevenue || []),
       goalRevenue:  slice(pnl.goalRevenue  || []),
     }
