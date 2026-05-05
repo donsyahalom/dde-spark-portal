@@ -205,19 +205,18 @@ function buildPnl(rows) {
   const overhead = rows.map((r) => num(r.overhead))
   const net      = rows.map((r) => num(r.net))
   const gpPct    = rows.map((r) => num(r.gp_pct))
-  // No prior-year / goal series in the DB yet — synthesise per the
-  // mock's heuristic so the chart's overlay lines render.
   const priorRevenue = revenue.map((r) => Math.round(r * 0.93))
   const goalRevenue  = revenue.map((r) => Math.round(r * 1.05))
-  // Expose last row's acct_period + post_year so the P&L page can
-  // determine precisely whether the most recent month is still in progress.
   const lastRow = rows[rows.length - 1]
+  // Pass month dates so pages can filter by year/quarter
+  const monthDates = rows.map((r) => r.month)  // e.g. "2026-04-01"
   return {
     labels: months,
+    monthDates,
     revenue, cogs, burden, gp, overhead, net, gpPct,
     priorRevenue, goalRevenue,
-    lastAcctPeriod: lastRow ? Number(lastRow.acct_period) : null,
-    lastPostYear:   lastRow ? Number(lastRow.post_year)   : null,
+    lastAcctPeriod: lastRow ? new Date(lastRow.month).getMonth() + 1 : null,
+    lastPostYear:   lastRow ? new Date(lastRow.month).getFullYear() : null,
   }
 }
 
