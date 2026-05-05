@@ -201,6 +201,22 @@ export default function OpsArPage() {
   // Email section is collapsed by default — admins can expand it.
   const [emailOpen, setEmailOpen] = useState(false)
   const [showRetainage, setShowRetainage] = useState(false)  // exclude retainage by default
+  // Archived invoice keys stored in localStorage — hidden from all lists
+  const LS_AR_ARCHIVE = 'dde.ops.arArchive'
+  const [archived, setArchived] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(LS_AR_ARCHIVE) || '[]')) }
+    catch { return new Set() }
+  })
+  const toggleArchive = (key) => {
+    setArchived((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      try { localStorage.setItem(LS_AR_ARCHIVE, JSON.stringify([...next])) } catch {}
+      return next
+    })
+  }
+  const [showArchived, setShowArchived] = useState(false)
 
   // Collapse state for each section — all expanded by default
   const [open, setOpen] = useState({
@@ -210,7 +226,6 @@ export default function OpsArPage() {
     openInvoices: true,
     openContract: true,
     openService: true,
-    allInvoices: true,
   })
   const toggle = (key) => setOpen((prev) => ({ ...prev, [key]: !prev[key] }))
 
@@ -422,7 +437,19 @@ export default function OpsArPage() {
       <OpsSectionCard
         title="Open invoices — sorted by days late"
         subtitle="Same list that ships in the weekly email. Oldest at the top."
-        right={<CollapseBtn sectionKey="openInvoices" />}
+        right={
+          <div className="ops-toolbar">
+            {archived.size > 0 && (
+              <label className="ops-checkbox" style={{ gap: 6, cursor: 'pointer', userSelect: 'none' }}>
+                <input type="checkbox" checked={showArchived}
+                  onChange={(e) => setShowArchived(e.target.checked)}
+                  style={{ accentColor: 'var(--gold)' }} />
+                <span className="ops-small ops-text-dim">Show archived ({archived.size})</span>
+              </label>
+            )}
+            <CollapseBtn sectionKey="openInvoices" />
+          </div>
+        }
       >
         {open.openInvoices && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 18 }}>
@@ -432,7 +459,7 @@ export default function OpsArPage() {
                 <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600 }}>Contract (AR)</div>
                 <CollapseBtn sectionKey="openContract" />
               </div>
-              {open.openContract && <InvoiceList title="" rows={arSorted} />}
+              {open.openContract && <InvoiceList title="" rows={arSorted.filter(i => showArchived || !archived.has(i.invoice))} archived={archived} onArchive={toggleArchive} isAdmin={true} />}
             </div>
             {/* Service sub-section */}
             <div>
@@ -440,7 +467,7 @@ export default function OpsArPage() {
                 <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600 }}>Service (SR)</div>
                 <CollapseBtn sectionKey="openService" />
               </div>
-              {open.openService && <InvoiceList title="" rows={srSorted} />}
+              {open.openService && <InvoiceList title="" rows={srSorted.filter(i => showArchived || !archived.has(i.invoice))} archived={archived} onArchive={toggleArchive} isAdmin={true} />}
             </div>
           </div>
         )}
@@ -618,54 +645,6 @@ export default function OpsArPage() {
         </OpsSectionCard>
       )}
 
-      {/* ── Legacy full A/R list (kept for reference) ───────────── */}
-      <OpsSectionCard
-        title="All open invoices — contract + service combined"
-        subtitle="Every open AR and SR invoice in one list. The aging report above groups these by customer; the sorted list above orders them by days late."
-        right={<CollapseBtn sectionKey="allInvoices" />}>
-        {open.allInvoices && <div style={{ overflowX: 'auto' }}>
-          <table className="ops-table">
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>Invoice</th>
-                <th>Customer</th>
-                <th>Job</th>
-                <th>Inv date</th>
-                <th>Due date</th>
-                <th className="right">Total</th>
-                <th className="right">Balance</th>
-                <th className="right">Days late</th>
-              </tr>
-            </thead>
-            <tbody>
-              {routedInvoices.map((r) => {
-                const dl = daysLateOf(r)
-                const ageCls = dl > 90 ? 'ops-text-neg' : dl > 60 ? 'ops-text-warn' : ''
-                return (
-                  <tr key={r.invoice}>
-                    <td>
-                      <span className={`chip ${r.type === 'AR' ? 'active' : 'hold'}`}>{r.type}</span>
-                      {r._rerouted && (
-                        <span title="Rerouted — job was reclassified on Jobs P&L page" style={{ marginLeft: 4, fontSize: '0.7rem', color: 'var(--gold)', opacity: 0.8 }}>↺</span>
-                      )}
-                    </td>
-                    <td>{r.invoice}</td>
-                    <td>{r.customer}</td>
-                    <td className="ops-text-dim">{r.job}</td>
-                    <td>{r.invDate}</td>
-                    <td>{r.dueDate}</td>
-                    <td className="right">{fmt(r.total)}</td>
-                    <td className="right" style={{ fontWeight: 600 }}>{fmt(r.balance)}</td>
-                    <td className={`right ${ageCls}`}>{dl > 0 ? `${dl} d` : 'current'}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>}
-      </OpsSectionCard>
-
       <OpsPaymentHistory />
 
       {/* ── Email preview modal ─────────────────────────────────── */}
@@ -715,8 +694,7 @@ export default function OpsArPage() {
   )
 }
 
-function InvoiceList({ title, rows }) {
-
+function InvoiceList({ title, rows, archived = new Set(), onArchive, isAdmin }) {
   return (
     <div>
       {title && <div className="ops-small" style={{ color: 'var(--white)', fontWeight: 600, marginBottom: 4 }}>{title}</div>}
@@ -729,25 +707,39 @@ function InvoiceList({ title, rows }) {
               <th>Inv date</th>
               <th className="right">Balance</th>
               <th className="right">Days late</th>
+              {isAdmin && <th style={{ width: 60 }}></th>}
             </tr>
           </thead>
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="center ops-text-dim">No open invoices.</td>
+                <td colSpan={isAdmin ? 6 : 5} className="center ops-text-dim">No open invoices.</td>
               </tr>
             )}
             {rows.map((inv) => {
-              const cls = inv.daysLate > 90 ? 'ops-text-neg' : inv.daysLate > 60 ? 'ops-text-warn' : inv.daysLate > 0 ? '' : 'ops-text-dim'
+              const isArchived = archived.has(inv.invoice)
+              const cls = isArchived ? 'ops-text-dim' : inv.daysLate > 90 ? 'ops-text-neg' : inv.daysLate > 60 ? 'ops-text-warn' : inv.daysLate > 0 ? '' : 'ops-text-dim'
               return (
-                <tr key={inv.invoice}>
+                <tr key={inv.invoice} style={isArchived ? { opacity: 0.45 } : undefined}>
                   <td>{inv.customer}</td>
                   <td>{inv.invoice}</td>
                   <td className="ops-text-dim">{inv.invDate}</td>
                   <td className="right" style={{ fontWeight: 600 }}>{fmt(inv.balance)}</td>
-                  <td className={`right ${cls}`} style={{ fontWeight: inv.daysLate > 0 ? 700 : 400 }}>
+                  <td className={`right ${cls}`} style={{ fontWeight: inv.daysLate > 0 && !isArchived ? 700 : 400 }}>
                     {inv.daysLate > 0 ? `${inv.daysLate} d` : 'current'}
                   </td>
+                  {isAdmin && (
+                    <td className="center">
+                      <button
+                        className="ops-btn ghost"
+                        style={{ fontSize: '0.68rem', padding: '2px 6px',
+                          color: isArchived ? 'var(--pos)' : 'rgba(255,255,255,0.35)',
+                          borderColor: isArchived ? 'rgba(72,212,100,0.4)' : 'rgba(255,255,255,0.15)' }}
+                        onClick={() => onArchive?.(inv.invoice)}
+                        title={isArchived ? 'Restore this invoice' : 'Archive — hide from list (stored locally)'}
+                      >{isArchived ? '↺' : '⊘'}</button>
+                    </td>
+                  )}
                 </tr>
               )
             })}
